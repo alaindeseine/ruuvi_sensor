@@ -3,10 +3,19 @@ import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'ruuvi_device.dart';
 import 'ruuvi_data_decoder.dart';
+import 'ruuvi_permissions.dart';
 import 'exceptions/ruuvi_exceptions.dart';
 
 class RuuviScanner {
   static const int _ruuviManufacturerId = 0x0499; // Ruuvi Innovations Ltd
+
+  /// Checks if the device is ready for RuuviTag scanning
+  ///
+  /// Returns a detailed result with setup instructions if needed
+  /// Use this before calling [startScan] to provide better user experience
+  static Future<PermissionCheckResult> checkSetup() async {
+    return await RuuviPermissions.checkPermissions();
+  }
 
   final StreamController<List<RuuviDevice>> _devicesController =
       StreamController<List<RuuviDevice>>.broadcast();
@@ -22,20 +31,16 @@ class RuuviScanner {
   /// Starts scanning for RuuviTag devices
   ///
   /// [timeout] optional timeout duration for the scan
-  /// Throws [RuuviException] if Bluetooth is not available or enabled
+  /// Throws [RuuviException] with detailed setup instructions if permissions are missing
   Future<void> startScan({Duration? timeout}) async {
     if (_isScanning) {
       return; // Already scanning
     }
 
-    // Check if Bluetooth is available and enabled
-    if (!await FlutterBluePlus.isSupported) {
-      throw RuuviException('Bluetooth is not supported on this device');
-    }
-
-    final adapterState = await FlutterBluePlus.adapterState.first;
-    if (adapterState != BluetoothAdapterState.on) {
-      throw RuuviException('Bluetooth is not enabled');
+    // Check permissions and provide helpful error messages
+    final permissionResult = await RuuviPermissions.checkPermissions();
+    if (!permissionResult.isReady) {
+      throw RuuviPermissions.createPermissionException(permissionResult);
     }
 
     _isScanning = true;

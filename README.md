@@ -33,28 +33,41 @@ dependencies:
 
 ### Permissions
 
-#### Android
+**⚠️ Important**: The package will automatically detect missing permissions and provide detailed setup instructions.
 
-Add these permissions to your `android/app/src/main/AndroidManifest.xml`:
+For complete permission setup instructions, see [PERMISSIONS.md](PERMISSIONS.md).
 
+#### Quick Setup
+
+**Android** - Add to `android/app/src/main/AndroidManifest.xml`:
 ```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<!-- For Android 12+ -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation" />
 <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<!-- For older versions -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 ```
 
-#### iOS
-
-Add this to your `ios/Runner/Info.plist`:
-
+**iOS** - Add to `ios/Runner/Info.plist`:
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
 <string>This app needs Bluetooth access to scan for RuuviTag sensors</string>
-<key>NSLocationWhenInUseUsageDescription</key>
-<string>This app needs location access for Bluetooth scanning</string>
+```
+
+#### Permission Helper
+
+The package includes a built-in permission checker:
+
+```dart
+// Check setup before scanning
+final setupResult = await RuuviScanner.checkSetup();
+if (!setupResult.isReady) {
+  // Show setup instructions
+  print(setupResult.recommendations.join('\n'));
+}
 ```
 
 ## Usage

@@ -21,16 +21,24 @@ Before running this example, make sure you have:
 
 ### Android Permissions
 
-Add these permissions to your `android/app/src/main/AndroidManifest.xml`:
+The example already includes the necessary permissions in `android/app/src/main/AndroidManifest.xml`. For Android 12+ (API 31+), these permissions are required:
 
 ```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<!-- Permissions Bluetooth pour Android 12+ (API 31+) -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+<!-- Nouvelles permissions pour Android 12+ -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
 <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+<!-- Permissions de localisation -->
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 ```
+
+**Important**: The `android:usesPermissionFlags="neverForLocation"` flag allows BLE scanning without location permission on Android 12+.
 
 ### iOS Permissions
 

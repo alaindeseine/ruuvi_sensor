@@ -53,22 +53,37 @@ class _RuuviScannerPageState extends State<RuuviScannerPage> {
 
   Future<void> _requestPermissions() async {
     // Request necessary permissions for BLE scanning
-    final permissions = [
-      Permission.bluetooth,
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.location,
-    ];
+    List<Permission> permissions = [];
+
+    // Permissions communes
+    permissions.add(Permission.location);
+
+    // Permissions spécifiques selon la version Android
+    if (await Permission.bluetoothScan.status != PermissionStatus.permanentlyDenied) {
+      permissions.addAll([
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+      ]);
+    } else {
+      // Fallback pour les anciennes versions Android
+      permissions.addAll([
+        Permission.bluetooth,
+      ]);
+    }
 
     for (final permission in permissions) {
       final status = await permission.request();
       if (status != PermissionStatus.granted) {
         setState(() {
-          _statusMessage = 'Permission $permission denied';
+          _statusMessage = 'Permission ${permission.toString().split('.').last} denied';
         });
         return;
       }
     }
+
+    setState(() {
+      _statusMessage = 'Permissions granted';
+    });
   }
 
   Future<void> _startScan() async {
