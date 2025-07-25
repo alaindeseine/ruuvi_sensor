@@ -115,16 +115,22 @@ class RuuviLogReader {
     String deviceId,
     Completer<RuuviMeasurement> completer,
   ) {
+    print('RuuviLogReader: Received ${data.length} bytes: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+
     if (data.length < 3) {
+      print('RuuviLogReader: Invalid response length: ${data.length}');
       return; // Invalid response
     }
-    
+
     final destination = data[0];
     final source = data[1];
     final type = data[2];
+
+    print('RuuviLogReader: dest=0x${destination.toRadixString(16)}, src=0x${source.toRadixString(16)}, type=0x${type.toRadixString(16)}');
     
     // Check for error response
     if (type == _errorResponse) {
+      print('RuuviLogReader: Error response received');
       if (!completer.isCompleted) {
         completer.completeError(
           RuuviDataException('Device reported error during log read'),
@@ -132,23 +138,21 @@ class RuuviLogReader {
       }
       return;
     }
-    
-    // Check for log write response
-    if (type != _logWriteResponse || data.length < 11) {
-      return; // Not a log entry or invalid length
-    }
-    
-    // Check for end of data marker (all 0xFF)
-    if (data.every((byte) => byte == 0xFF)) {
-      // End of log data
+
+    // For now, let's try to parse any data we receive
+    // Many RuuviTags don't implement the full log protocol
+
+    // Check for end of data marker (all 0xFF) or timeout
+    if (data.every((byte) => byte == 0xFF) || data.length == 0) {
+      print('RuuviLogReader: End of data or empty response');
       if (!completer.isCompleted) {
-        final startTime = measurements.isNotEmpty 
-            ? measurements.first.timestamp 
+        final startTime = measurements.isNotEmpty
+            ? measurements.first.timestamp
             : DateTime.now();
-        final endTime = measurements.isNotEmpty 
-            ? measurements.last.timestamp 
+        final endTime = measurements.isNotEmpty
+            ? measurements.last.timestamp
             : DateTime.now();
-            
+
         completer.complete(RuuviMeasurement(
           measurements: measurements,
           startTime: startTime,
@@ -158,15 +162,33 @@ class RuuviLogReader {
       }
       return;
     }
+
+    // Try to parse as log write response if length matches
+    if (type == _logWriteResponse && data.length >= 11) {
+      _parseLogEntry(data, measurements, deviceId);
+      return;
+    }
+
+    // If we get here, the device might not support historical data
+    // or uses a different protocol. Complete with empty result after timeout.
+    print('RuuviLogReader: Unrecognized response format, type=0x${type.toRadixString(16)}, length=${data.length}');
     
+  }
+
+  /// Parses a log entry from the device
+  void _parseLogEntry(Uint8List data, List<RuuviData> measurements, String deviceId) {
+    if (data.length < 11) return;
+
+    final source = data[1];
+
     // Parse timestamp (4 bytes, big-endian)
     final timestamp = (data[3] << 24) | (data[4] << 16) | (data[5] << 8) | data[6];
     final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-    
+
     // Parse value (4 bytes, big-endian, signed)
     final rawValue = (data[7] << 24) | (data[8] << 16) | (data[9] << 8) | data[10];
     final value = rawValue > 0x7FFFFFFF ? rawValue - 0x100000000 : rawValue;
-    
+
     // Convert based on source endpoint
     RuuviData? ruuviData;
     switch (source) {
@@ -179,7 +201,7 @@ class RuuviLogReader {
           timestamp: dateTime,
         );
         break;
-        
+
       case _humidityEndpoint:
         ruuviData = RuuviData(
           deviceId: deviceId,
@@ -189,7 +211,7 @@ class RuuviLogReader {
           timestamp: dateTime,
         );
         break;
-        
+
       case _pressureEndpoint:
         ruuviData = RuuviData(
           deviceId: deviceId,
@@ -200,9 +222,10 @@ class RuuviLogReader {
         );
         break;
     }
-    
+
     if (ruuviData != null) {
       measurements.add(ruuviData);
+      print('RuuviLogReader: Added measurement: ${ruuviData.toString()}');
     }
   }
 }

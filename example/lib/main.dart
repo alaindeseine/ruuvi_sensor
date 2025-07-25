@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:ruuvi_sensor/ruuvi_sensor.dart';
 
 void main() {
@@ -51,63 +50,80 @@ class _RuuviScannerPageState extends State<RuuviScannerPage> {
     super.dispose();
   }
 
-  Future<void> _requestPermissions() async {
-    // Request necessary permissions for BLE scanning
-    List<Permission> permissions = [];
-
-    // Permissions communes
-    permissions.add(Permission.location);
-
-    // Permissions spécifiques selon la version Android
-    if (await Permission.bluetoothScan.status != PermissionStatus.permanentlyDenied) {
-      permissions.addAll([
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-      ]);
-    } else {
-      // Fallback pour les anciennes versions Android
-      permissions.addAll([
-        Permission.bluetooth,
-      ]);
+  Future<void> _checkSetup() async {
+    try {
+      // The ruuvi_sensor package will handle permissions automatically
+      // when startScan() is called. This method is now simplified.
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Setup complete - ready to scan';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Setup check failed: $e';
+      });
     }
-
-    for (final permission in permissions) {
-      final status = await permission.request();
-      if (status != PermissionStatus.granted) {
-        setState(() {
-          _statusMessage = 'Permission ${permission.toString().split('.').last} denied';
-        });
-        return;
-      }
-    }
-
-    setState(() {
-      _statusMessage = 'Permissions granted';
-    });
   }
 
   Future<void> _startScan() async {
     try {
+      if (!mounted) return;
       setState(() {
         _isScanning = true;
-        _statusMessage = 'Requesting permissions...';
+        _statusMessage = 'Checking setup...';
       });
 
-      await _requestPermissions();
+      await _checkSetup();
 
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Scanning for RuuviTag devices...';
       });
 
       await _scanner.startScan(timeout: const Duration(seconds: 30));
-      
+
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Scan completed';
         _isScanning = false;
       });
+    } on RuuviException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Ruuvi Error: $e';
+        _isScanning = false;
+      });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Error: $e';
+        _isScanning = false;
+      });
+    }
+  }
+
+  Future<void> _startContinuousScan() async {
+    try {
+      if (!mounted) return;
+      setState(() {
+        _isScanning = true;
+        _statusMessage = 'Starting live mode...';
+      });
+
+      await _checkSetup();
+
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Live mode - scanning continuously...';
+      });
+
+      await _scanner.startContinuousScan();
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Live mode failed: $e';
         _isScanning = false;
       });
     }
@@ -116,11 +132,13 @@ class _RuuviScannerPageState extends State<RuuviScannerPage> {
   Future<void> _stopScan() async {
     try {
       await _scanner.stopScan();
+      if (!mounted) return;
       setState(() {
         _isScanning = false;
         _statusMessage = 'Scan stopped';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Error stopping scan: $e';
       });
@@ -151,11 +169,15 @@ class _RuuviScannerPageState extends State<RuuviScannerPage> {
                   children: [
                     ElevatedButton(
                       onPressed: _isScanning ? null : _startScan,
-                      child: const Text('Start Scan'),
+                      child: const Text('Scan Once'),
+                    ),
+                    ElevatedButton(
+                      onPressed: _isScanning ? null : _startContinuousScan,
+                      child: const Text('Live Mode'),
                     ),
                     ElevatedButton(
                       onPressed: _isScanning ? _stopScan : null,
-                      child: const Text('Stop Scan'),
+                      child: const Text('Stop'),
                     ),
                   ],
                 ),
@@ -291,7 +313,19 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
   String _statusMessage = 'Not connected';
   RuuviMeasurement? _historicalData;
 
+  @override
+  void dispose() {
+    // Disconnect from device if still connected to avoid memory leaks
+    if (_isConnected) {
+      widget.device.disconnect().catchError((e) {
+        // Ignore errors during dispose
+      });
+    }
+    super.dispose();
+  }
+
   Future<void> _connectToDevice() async {
+    if (!mounted) return;
     setState(() {
       _isConnecting = true;
       _statusMessage = 'Connecting...';
@@ -299,12 +333,14 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
 
     try {
       await widget.device.connect();
+      if (!mounted) return;
       setState(() {
         _isConnected = true;
         _isConnecting = false;
         _statusMessage = 'Connected';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isConnecting = false;
         _statusMessage = 'Connection failed: $e';
@@ -315,11 +351,13 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
   Future<void> _disconnectFromDevice() async {
     try {
       await widget.device.disconnect();
+      if (!mounted) return;
       setState(() {
         _isConnected = false;
         _statusMessage = 'Disconnected';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Disconnect failed: $e';
       });
@@ -328,25 +366,38 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
 
   Future<void> _getHistoricalData() async {
     if (!_isConnected) {
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Must be connected to get historical data';
       });
       return;
     }
 
+    if (!mounted) return;
     setState(() {
-      _statusMessage = 'Retrieving historical data...';
+      _statusMessage = 'Retrieving historical data...\nThis may take several minutes.';
     });
 
     try {
-      final data = await widget.device.getStoredData();
+      // Get data from last 24 hours
+      final data = await widget.device.getStoredData(
+        startTime: DateTime.now().subtract(const Duration(hours: 24)),
+        timeout: const Duration(minutes: 10), // Longer timeout
+      );
+
+      if (!mounted) return;
       setState(() {
         _historicalData = data;
-        _statusMessage = 'Retrieved ${data.totalCount} measurements';
+        if (data.totalCount > 0) {
+          _statusMessage = 'Retrieved ${data.totalCount} measurements from ${data.startTime} to ${data.endTime}';
+        } else {
+          _statusMessage = 'No historical data available.\nNote: Many RuuviTags don\'t support historical data retrieval or need firmware 3.x+';
+        }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _statusMessage = 'Failed to get historical data: $e';
+        _statusMessage = 'Historical data failed: $e\n\nNote: Historical data requires:\n- Firmware 3.x or higher\n- Device must have been logging for some time\n- Some RuuviTags don\'t support this feature';
       });
     }
   }

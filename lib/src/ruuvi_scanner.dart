@@ -30,9 +30,10 @@ class RuuviScanner {
 
   /// Starts scanning for RuuviTag devices
   ///
-  /// [timeout] optional timeout duration for the scan
+  /// [timeout] optional timeout duration for the scan. If null, scans indefinitely
+  /// [continuous] if true, continues scanning after timeout for real-time updates
   /// Throws [RuuviException] with detailed setup instructions if permissions are missing
-  Future<void> startScan({Duration? timeout}) async {
+  Future<void> startScan({Duration? timeout, bool continuous = false}) async {
     if (_isScanning) {
       return; // Already scanning
     }
@@ -50,7 +51,7 @@ class RuuviScanner {
     try {
       // Start scanning for devices
       await FlutterBluePlus.startScan(
-        timeout: timeout ?? const Duration(seconds: 30),
+        timeout: continuous ? null : (timeout ?? const Duration(seconds: 30)),
         androidUsesFineLocation: false,
       );
 
@@ -65,7 +66,7 @@ class RuuviScanner {
 
       // Listen for scan completion
       FlutterBluePlus.isScanning.listen((scanning) {
-        if (!scanning && _isScanning) {
+        if (!scanning && _isScanning && !continuous) {
           _isScanning = false;
         }
       });
@@ -73,6 +74,14 @@ class RuuviScanner {
       _isScanning = false;
       throw RuuviException('Failed to start scan: $e');
     }
+  }
+
+  /// Starts continuous scanning for real-time data updates
+  ///
+  /// This will scan indefinitely until [stopScan] is called
+  /// Perfect for real-time monitoring applications
+  Future<void> startContinuousScan() async {
+    return startScan(continuous: true);
   }
 
   /// Stops the current scan
