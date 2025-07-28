@@ -1,3 +1,13 @@
+## 0.0.9+device-info-fix
+
+* **IMPROVED**: Better Device Information Service (180A) reading
+* Correctly searches for characteristics using UUID contains() method
+* Added `readDeviceInformationService()` method for comprehensive device info
+* Reads serial number (2A25), firmware (2A26), hardware (2A27), manufacturer (2A29), model (2A24)
+* Enhanced debugging with detailed logging of available services/characteristics
+* Improved error handling and fallback mechanisms
+* Better user feedback when Device Information Service is not available
+
 ## 0.0.8+serial-number
 
 * **NEW FEATURE**: Added dedicated serial number reading capability

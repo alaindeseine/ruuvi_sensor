@@ -404,20 +404,26 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
 
     if (!mounted) return;
     setState(() {
-      _statusMessage = 'Reading device information...';
+      _statusMessage = 'Reading Device Information Service...\nCheck logs for details!';
     });
 
     try {
-      final deviceInfo = await widget.device.readDeviceInfo();
+      final deviceInfo = await widget.device.readDeviceInformationService();
       if (!mounted) return;
 
-      final infoText = deviceInfo.entries
-          .map((e) => '${e.key}: ${e.value}')
-          .join('\n');
+      if (deviceInfo.isNotEmpty && !deviceInfo.containsKey('error')) {
+        final infoText = deviceInfo.entries
+            .map((e) => '${e.key.replaceAll('_', ' ')}: ${e.value}')
+            .join('\n');
 
-      setState(() {
-        _statusMessage = 'Device Info:\n$infoText';
-      });
+        setState(() {
+          _statusMessage = 'Device Information Service:\n$infoText';
+        });
+      } else {
+        setState(() {
+          _statusMessage = deviceInfo['error'] ?? 'No device information available.\n\nThis RuuviTag may not expose the Device Information Service (180A).\n\nCheck logs for more details.';
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
