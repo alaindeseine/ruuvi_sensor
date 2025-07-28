@@ -1,3 +1,10 @@
+## 0.0.3+fix
+
+* **CRITICAL FIX**: Fixed UI not updating with real-time sensor data
+* Now properly notifies listeners when existing device data changes
+* Real-time temperature, humidity, and pressure updates now work correctly
+* Continuous scanning mode now fully functional
+
 ## 0.0.2+debug
 
 * Added comprehensive debug logging throughout the scanning process

@@ -207,7 +207,8 @@ class RuuviScanner {
           print('   🔄 Updating existing device: $deviceId');
           // Update existing device with new data
           existingDevice.updateData(ruuviData, result.rssi);
-          print('   ✅ Device data updated');
+          devicesUpdated = true; // ← FIX: Notifier aussi pour les mises à jour !
+          print('   ✅ Device data updated - will notify listeners');
         }
       } catch (e) {
         print('   💥 Exception processing device: $e');
