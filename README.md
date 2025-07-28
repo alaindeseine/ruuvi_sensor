@@ -28,7 +28,7 @@ Add this package to your `pubspec.yaml`:
 ```yaml
 dependencies:
   ruuvi_sensor: ^0.0.1
-  flutter_blue_plus: ^1.32.12  # Required peer dependency
+  flutter_blue_plus: ^1.35.5  # Required peer dependency
 ```
 
 ### Permissions
