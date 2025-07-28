@@ -364,6 +364,39 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
     }
   }
 
+  Future<void> _getDeviceInfo() async {
+    if (!_isConnected) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Must be connected to get device info';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = 'Reading device information...';
+    });
+
+    try {
+      final deviceInfo = await widget.device.readDeviceInfo();
+      if (!mounted) return;
+
+      final infoText = deviceInfo.entries
+          .map((e) => '${e.key}: ${e.value}')
+          .join('\n');
+
+      setState(() {
+        _statusMessage = 'Device Info:\n$infoText';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Failed to read device info: $e';
+      });
+    }
+  }
+
   Future<void> _getHistoricalData() async {
     if (!_isConnected) {
       if (!mounted) return;
@@ -453,7 +486,14 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
                     child: Text(_isConnected ? 'Disconnect' : 'Connect'),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isConnected ? _getDeviceInfo : null,
+                    child: const Text('Device Info'),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isConnected ? _getHistoricalData : null,

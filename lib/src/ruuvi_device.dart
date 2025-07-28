@@ -55,6 +55,85 @@ class RuuviDevice {
     _rssi = newRssi;
   }
 
+  /// Reads device information including firmware version
+  Future<Map<String, String>> readDeviceInfo() async {
+    final deviceInfo = <String, String>{};
+
+    try {
+      print('📋 RuuviDevice: Reading device information...');
+
+      // Check if device is connected
+      if (!device.isConnected) {
+        throw RuuviException('Device not connected');
+      }
+
+      // Discover services if not already done
+      final services = await device.discoverServices();
+      print('📋 RuuviDevice: Found ${services.length} services');
+
+      // Look for Device Information Service (0x180A)
+      final deviceInfoService = services.where((s) =>
+        s.uuid.toString().toLowerCase() == '0000180a-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+      if (deviceInfoService != null) {
+        print('📋 RuuviDevice: Found Device Information Service');
+
+        // Read firmware revision (0x2A26)
+        final firmwareChar = deviceInfoService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a26-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (firmwareChar != null) {
+          final firmwareData = await firmwareChar.read();
+          deviceInfo['firmware'] = String.fromCharCodes(firmwareData);
+          print('📋 RuuviDevice: Firmware version: ${deviceInfo['firmware']}');
+        }
+
+        // Read hardware revision (0x2A27)
+        final hardwareChar = deviceInfoService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a27-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (hardwareChar != null) {
+          final hardwareData = await hardwareChar.read();
+          deviceInfo['hardware'] = String.fromCharCodes(hardwareData);
+          print('📋 RuuviDevice: Hardware version: ${deviceInfo['hardware']}');
+        }
+
+        // Read manufacturer name (0x2A29)
+        final manufacturerChar = deviceInfoService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a29-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (manufacturerChar != null) {
+          final manufacturerData = await manufacturerChar.read();
+          deviceInfo['manufacturer'] = String.fromCharCodes(manufacturerData);
+          print('📋 RuuviDevice: Manufacturer: ${deviceInfo['manufacturer']}');
+        }
+      } else {
+        print('📋 RuuviDevice: Device Information Service not found');
+      }
+
+      // Also try to read device name from GAP service (0x1800)
+      final gapService = services.where((s) =>
+        s.uuid.toString().toLowerCase() == '00001800-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+      if (gapService != null) {
+        final deviceNameChar = gapService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a00-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (deviceNameChar != null) {
+          final nameData = await deviceNameChar.read();
+          deviceInfo['device_name'] = String.fromCharCodes(nameData);
+          print('📋 RuuviDevice: Device name: ${deviceInfo['device_name']}');
+        }
+      }
+
+    } catch (e) {
+      print('❌ RuuviDevice: Error reading device info: $e');
+      throw RuuviException('Failed to read device information: $e');
+    }
+
+    return deviceInfo;
+  }
+
   /// Connects to the RuuviTag device
   ///
   /// Establishes a GATT connection and discovers the Nordic UART Service

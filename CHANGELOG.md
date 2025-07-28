@@ -1,3 +1,11 @@
+## 0.0.7+device-info
+
+* **NEW FEATURE**: Added device information reading capability
+* Read firmware version, hardware version, manufacturer name from GATT
+* Added `readDeviceInfo()` method to RuuviDevice class
+* Added "Device Info" button in example app to test functionality
+* Helps identify firmware version for protocol compatibility
+
 ## 0.0.6+scan-fix
 
 * **CRITICAL FIX**: Fixed "Scan Once" continuing to scan indefinitely
