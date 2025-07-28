@@ -78,6 +78,16 @@ class RuuviDevice {
       if (deviceInfoService != null) {
         print('📋 RuuviDevice: Found Device Information Service');
 
+        // Read serial number (0x2A25) - PRIORITY
+        final serialChar = deviceInfoService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a25-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (serialChar != null) {
+          final serialData = await serialChar.read();
+          deviceInfo['serial_number'] = String.fromCharCodes(serialData);
+          print('📋 RuuviDevice: Serial Number: ${deviceInfo['serial_number']}');
+        }
+
         // Read firmware revision (0x2A26)
         final firmwareChar = deviceInfoService.characteristics.where((c) =>
           c.uuid.toString().toLowerCase() == '00002a26-0000-1000-8000-00805f9b34fb').firstOrNull;
@@ -109,6 +119,11 @@ class RuuviDevice {
         }
       } else {
         print('📋 RuuviDevice: Device Information Service not found');
+        print('📋 RuuviDevice: Using fallback methods for device info...');
+
+        // Fallback: Use device ID as serial number if DIS not available
+        deviceInfo['serial_number_fallback'] = device.remoteId.str;
+        print('📋 RuuviDevice: Serial Number (fallback): ${deviceInfo['serial_number_fallback']}');
       }
 
       // Also try to read device name from GAP service (0x1800)
@@ -132,6 +147,55 @@ class RuuviDevice {
     }
 
     return deviceInfo;
+  }
+
+  /// Reads the serial number specifically
+  /// Returns the serial number from Device Information Service or fallback to device ID
+  Future<String> readSerialNumber() async {
+    try {
+      print('📋 RuuviDevice: Reading serial number...');
+
+      // Check if device is connected
+      if (!device.isConnected) {
+        throw RuuviException('Device not connected');
+      }
+
+      // Discover services if not already done
+      final services = await device.discoverServices();
+
+      // Look for Device Information Service (0x180A)
+      final deviceInfoService = services.where((s) =>
+        s.uuid.toString().toLowerCase() == '0000180a-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+      if (deviceInfoService != null) {
+        print('📋 RuuviDevice: Found Device Information Service');
+
+        // Read serial number (0x2A25)
+        final serialChar = deviceInfoService.characteristics.where((c) =>
+          c.uuid.toString().toLowerCase() == '00002a25-0000-1000-8000-00805f9b34fb').firstOrNull;
+
+        if (serialChar != null) {
+          final serialData = await serialChar.read();
+          final serialNumber = String.fromCharCodes(serialData);
+          print('📋 RuuviDevice: Serial Number: $serialNumber');
+          return serialNumber;
+        } else {
+          print('📋 RuuviDevice: Serial Number characteristic not found');
+        }
+      } else {
+        print('📋 RuuviDevice: Device Information Service not found');
+      }
+
+      // Fallback: Use device ID
+      final fallbackSerial = device.remoteId.str;
+      print('📋 RuuviDevice: Using device ID as serial number: $fallbackSerial');
+      return fallbackSerial;
+
+    } catch (e) {
+      print('❌ RuuviDevice: Error reading serial number: $e');
+      // Return device ID as ultimate fallback
+      return device.remoteId.str;
+    }
   }
 
   /// Connects to the RuuviTag device

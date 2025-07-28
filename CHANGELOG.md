@@ -1,3 +1,12 @@
+## 0.0.8+serial-number
+
+* **NEW FEATURE**: Added dedicated serial number reading capability
+* Correctly reads serial number from Device Information Service (UUID 0x2A25)
+* Added `readSerialNumber()` method to RuuviDevice class
+* Fallback to device ID if Device Information Service not available
+* Added "Serial" button in example app for quick serial number access
+* Improved device identification for firmware 3.31.1 compatibility
+
 ## 0.0.7+device-info
 
 * **NEW FEATURE**: Added device information reading capability

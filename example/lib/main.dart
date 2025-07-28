@@ -364,6 +364,35 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
     }
   }
 
+  Future<void> _getSerialNumber() async {
+    if (!_isConnected) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Must be connected to get serial number';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = 'Reading serial number...';
+    });
+
+    try {
+      final serialNumber = await widget.device.readSerialNumber();
+      if (!mounted) return;
+
+      setState(() {
+        _statusMessage = 'Serial Number: $serialNumber';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Failed to read serial number: $e';
+      });
+    }
+  }
+
   Future<void> _getDeviceInfo() async {
     if (!_isConnected) {
       if (!mounted) return;
@@ -486,18 +515,25 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
                     child: Text(_isConnected ? 'Disconnect' : 'Connect'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isConnected ? _getSerialNumber : null,
+                    child: const Text('Serial'),
+                  ),
+                ),
+                const SizedBox(width: 4),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isConnected ? _getDeviceInfo : null,
                     child: const Text('Device Info'),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isConnected ? _getHistoricalData : null,
-                    child: const Text('Get History'),
+                    child: const Text('History'),
                   ),
                 ),
               ],
