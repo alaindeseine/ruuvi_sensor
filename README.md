@@ -209,7 +209,7 @@ class _RuuviExampleState extends State<RuuviExample> {
                 return ListTile(
                   title: Text(device.name),
                   subtitle: data != null
-                      ? Text('${data.temperature.toStringAsFixed(1)}°C, '
+                      ? Text('${data.temperature.toStringAsFixed(2)}°C, '
                              '${data.humidity.toStringAsFixed(1)}%, '
                              '${(data.pressure / 100).toStringAsFixed(0)} hPa')
                       : Text('No data'),

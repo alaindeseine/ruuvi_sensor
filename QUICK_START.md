@@ -208,7 +208,7 @@ class _RuuviTestPageState extends State<RuuviTestPage> {
                           Text('Serial: ${device.serialNumber}'),
                           Text('RSSI: ${device.rssi} dBm'),
                           if (data != null) ...[
-                            Text('Temp: ${data.temperature.toStringAsFixed(1)}°C'),
+                            Text('Temp: ${data.temperature.toStringAsFixed(2)}°C'),
                             Text('Humidity: ${data.humidity.toStringAsFixed(1)}%'),
                             Text('Pressure: ${(data.pressure / 100).toStringAsFixed(0)} hPa'),
                           ],

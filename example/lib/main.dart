@@ -245,9 +245,9 @@ class RuuviDeviceCard extends StatelessWidget {
                 children: [
                   _buildDataColumn(
                     'Temperature',
-                    data.temperature.isNaN 
-                        ? 'N/A' 
-                        : '${data.temperature.toStringAsFixed(1)}°C',
+                    data.temperature.isNaN
+                        ? 'N/A'
+                        : '${data.temperature.toStringAsFixed(2)}°C',
                     Icons.thermostat,
                   ),
                   _buildDataColumn(
@@ -481,7 +481,7 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
                         style: const TextStyle(fontSize: 14),
                       ),
                       subtitle: Text(
-                        'T: ${measurement.temperature.isNaN ? 'N/A' : measurement.temperature.toStringAsFixed(1)}°C, '
+                        'T: ${measurement.temperature.isNaN ? 'N/A' : measurement.temperature.toStringAsFixed(2)}°C, '
                         'H: ${measurement.humidity.isNaN ? 'N/A' : measurement.humidity.toStringAsFixed(1)}%, '
                         'P: ${measurement.pressure.isNaN ? 'N/A' : (measurement.pressure / 100).toStringAsFixed(0)} hPa',
                         style: const TextStyle(fontSize: 12),

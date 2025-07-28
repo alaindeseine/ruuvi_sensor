@@ -1,3 +1,9 @@
+## 0.0.5+ui-precision
+
+* **UI FIX**: Temperature now displays with 2 decimal places in the user interface
+* Updated example app, documentation, and all temperature displays for consistency
+* Better temperature monitoring with precise real-time updates
+
 ## 0.0.4+precision
 
 * Improved temperature display precision to 2 decimal places for better monitoring
