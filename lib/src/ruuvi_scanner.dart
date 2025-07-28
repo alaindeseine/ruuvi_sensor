@@ -22,11 +22,21 @@ class RuuviScanner {
 
   final Map<String, RuuviDevice> _discoveredDevices = {};
   StreamSubscription? _scanSubscription;
+  StreamSubscription? _scanStateSubscription;
   bool _isScanning = false;
 
   Stream<List<RuuviDevice>> get devicesStream => _devicesController.stream;
   List<RuuviDevice> get discoveredDevices => List.unmodifiable(_discoveredDevices.values.toList());
   bool get isScanning => _isScanning;
+
+  /// Returns the current scanning state from Flutter Blue Plus
+  Future<bool> get isActuallyScanning async {
+    try {
+      return await FlutterBluePlus.isScanning.first;
+    } catch (e) {
+      return false;
+    }
+  }
 
   /// Starts scanning for RuuviTag devices
   ///
@@ -97,11 +107,14 @@ class RuuviScanner {
       // Listen for scan completion (only if timeout is set)
       if (timeout != null) {
         print('⏰ RuuviScanner: Setting up scan completion listener for timeout: $timeout');
-        FlutterBluePlus.isScanning.listen((scanning) {
+        _scanStateSubscription = FlutterBluePlus.isScanning.listen((scanning) {
           print('🔄 RuuviScanner: Scanning state changed: $scanning');
           if (!scanning && _isScanning) {
             print('🛑 RuuviScanner: Scan completed, setting _isScanning to false');
             _isScanning = false;
+            // Clean up the state subscription
+            _scanStateSubscription?.cancel();
+            _scanStateSubscription = null;
           }
         });
       } else {
@@ -112,6 +125,13 @@ class RuuviScanner {
     } catch (e) {
       print('💥 RuuviScanner: Exception during scan setup: $e');
       _isScanning = false;
+
+      // Clean up subscriptions on error
+      await _scanSubscription?.cancel();
+      _scanSubscription = null;
+      await _scanStateSubscription?.cancel();
+      _scanStateSubscription = null;
+
       throw RuuviException('Failed to start scan: $e');
     }
   }
@@ -133,11 +153,20 @@ class RuuviScanner {
     }
 
     try {
+      print('🛑 RuuviScanner: Stopping scan...');
       await FlutterBluePlus.stopScan();
+
+      // Cancel all subscriptions
       await _scanSubscription?.cancel();
       _scanSubscription = null;
+
+      await _scanStateSubscription?.cancel();
+      _scanStateSubscription = null;
+
       _isScanning = false;
+      print('✅ RuuviScanner: Scan stopped successfully');
     } catch (e) {
+      print('❌ RuuviScanner: Error stopping scan: $e');
       throw RuuviException('Failed to stop scan: $e');
     }
   }
@@ -231,6 +260,7 @@ class RuuviScanner {
   /// Disposes of resources
   void dispose() {
     _scanSubscription?.cancel();
+    _scanStateSubscription?.cancel();
     _devicesController.close();
   }
 }

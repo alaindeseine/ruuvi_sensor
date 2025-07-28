@@ -1,3 +1,11 @@
+## 0.0.6+scan-fix
+
+* **CRITICAL FIX**: Fixed "Scan Once" continuing to scan indefinitely
+* Properly manage scan state listeners and subscriptions
+* Clean up resources on scan completion and errors
+* Added `isActuallyScanning` method for debugging scan state
+* Improved error handling in scan operations
+
 ## 0.0.5+ui-precision
 
 * **UI FIX**: Temperature now displays with 2 decimal places in the user interface
