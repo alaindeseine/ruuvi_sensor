@@ -184,7 +184,7 @@ class RuuviScanner {
           continue; // Failed to decode
         }
 
-        print('   ✅ Successfully decoded Ruuvi data: T=${ruuviData.temperature.toStringAsFixed(1)}°C, H=${ruuviData.humidity.toStringAsFixed(1)}%, P=${ruuviData.pressure.toStringAsFixed(0)}Pa');
+        print('   ✅ Successfully decoded Ruuvi data: T=${ruuviData.temperature.toStringAsFixed(2)}°C, H=${ruuviData.humidity.toStringAsFixed(1)}%, P=${ruuviData.pressure.toStringAsFixed(0)}Pa');
 
         // Create or update RuuviDevice
         final deviceId = result.device.remoteId.str;

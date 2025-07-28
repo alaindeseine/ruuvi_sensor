@@ -1,3 +1,8 @@
+## 0.0.4+precision
+
+* Improved temperature display precision to 2 decimal places for better monitoring
+* Enhanced debug logs for better temperature change visibility
+
 ## 0.0.3+fix
 
 * **CRITICAL FIX**: Fixed UI not updating with real-time sensor data
