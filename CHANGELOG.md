@@ -1,3 +1,17 @@
+## 0.1.0+history-rewrite
+
+* **MAJOR REWRITE**: Complete overhaul of historical data retrieval for firmware 3.31.1+
+* **BREAKING CHANGE**: `getStoredData()` now uses Cut-RAWv2 format instead of old protocol
+* **NEW**: Added `RuuviHistoryParser` class for Cut-RAWv2 format parsing
+* **FIXED**: Corrected Nordic UART Service UUID assignments (TX/RX were swapped)
+* **IMPROVED**: Proper command sending via TX characteristic (6E400002)
+* **IMPROVED**: Proper data reception via RX characteristic (6E400003)
+* **NEW**: Supports history commands 0x03, 0x05, and 0x80 with automatic fallback
+* **NEW**: 10-byte entry parsing: timestamp + temperature + humidity + pressure
+* **NEW**: Proper Cut-RAWv2 data validation and range checking
+* **IMPROVED**: Enhanced debugging and logging throughout the process
+* **COMPATIBLE**: Works with RuuviTag firmware 3.31.1+ (Cut-RAWv2 format)
+
 ## 0.0.9+device-info-fix
 
 * **IMPROVED**: Better Device Information Service (180A) reading

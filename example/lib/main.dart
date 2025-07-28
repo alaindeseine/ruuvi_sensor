@@ -447,10 +447,9 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
     });
 
     try {
-      // Get data from last 24 hours
+      // Get historical data (Cut-RAWv2 format)
       final data = await widget.device.getStoredData(
-        startTime: DateTime.now().subtract(const Duration(hours: 24)),
-        timeout: const Duration(minutes: 10), // Longer timeout
+        timeout: const Duration(seconds: 30), // Reasonable timeout for history
       );
 
       if (!mounted) return;

@@ -4,13 +4,14 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'models/ruuvi_data.dart';
 import 'models/ruuvi_measurement.dart';
 import 'ruuvi_log_reader.dart';
+import 'ruuvi_history_parser.dart';
 import 'exceptions/ruuvi_exceptions.dart';
 
 class RuuviDevice {
   // Nordic UART Service UUIDs
   static const String _nusServiceUuid = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
-  static const String _nusRxCharacteristicUuid = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E';
-  static const String _nusTxCharacteristicUuid = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
+  static const String _nusTxCharacteristicUuid = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E'; // Write to device
+  static const String _nusRxCharacteristicUuid = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E'; // Read from device
 
   final BluetoothDevice device;
   final String serialNumber;
@@ -20,8 +21,8 @@ class RuuviDevice {
   // Connection state
   bool _isConnected = false;
   BluetoothService? _nusService;
-  BluetoothCharacteristic? _rxCharacteristic;
-  BluetoothCharacteristic? _txCharacteristic;
+  BluetoothCharacteristic? _txCharacteristic; // Write to device (6E400002)
+  BluetoothCharacteristic? _rxCharacteristic; // Read from device (6E400003)
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _notificationSubscription;
 
@@ -309,18 +310,18 @@ class RuuviDevice {
       );
 
       // Find characteristics
-      _rxCharacteristic = _nusService!.characteristics.firstWhere(
-        (char) => char.uuid.toString().toUpperCase() == _nusRxCharacteristicUuid.toUpperCase(),
-        orElse: () => throw RuuviConnectionException('RX characteristic not found'),
-      );
-
       _txCharacteristic = _nusService!.characteristics.firstWhere(
         (char) => char.uuid.toString().toUpperCase() == _nusTxCharacteristicUuid.toUpperCase(),
         orElse: () => throw RuuviConnectionException('TX characteristic not found'),
       );
 
-      // Enable notifications on TX characteristic
-      await _txCharacteristic!.setNotifyValue(true);
+      _rxCharacteristic = _nusService!.characteristics.firstWhere(
+        (char) => char.uuid.toString().toUpperCase() == _nusRxCharacteristicUuid.toUpperCase(),
+        orElse: () => throw RuuviConnectionException('RX characteristic not found'),
+      );
+
+      // Enable notifications on RX characteristic (read from device)
+      await _rxCharacteristic!.setNotifyValue(true);
 
       // Listen for notifications (responses from device)
       _notificationSubscription = _txCharacteristic!.lastValueStream.listen(
@@ -337,40 +338,114 @@ class RuuviDevice {
     }
   }
 
-  /// Retrieves stored historical data from the device
+  /// Retrieves stored historical data from the device using Cut-RAWv2 format
   ///
-  /// [startTime] optional start time for data retrieval (defaults to 7 days ago)
-  /// [timeout] timeout for the operation (defaults to 5 minutes)
+  /// [timeout] timeout for the operation (defaults to 30 seconds)
   ///
   /// Returns [RuuviMeasurement] containing all retrieved historical data
   /// Throws [RuuviConnectionException] if not connected
   /// Throws [RuuviDataException] if data retrieval fails
   Future<RuuviMeasurement> getStoredData({
-    DateTime? startTime,
-    Duration timeout = const Duration(minutes: 5),
+    Duration timeout = const Duration(seconds: 30),
   }) async {
-    if (!_isConnected) {
-      throw RuuviConnectionException('Device not connected');
+    if (!_isConnected || _txCharacteristic == null || _rxCharacteristic == null) {
+      throw RuuviConnectionException('Device not connected or NUS not available');
     }
 
-    // Default to 7 days ago if no start time specified
-    final start = startTime ?? DateTime.now().subtract(const Duration(days: 7));
-    final end = DateTime.now();
+    print('📚 RuuviDevice: Starting historical data retrieval...');
 
-    // Convert to Unix timestamps
-    final startTimestamp = start.millisecondsSinceEpoch ~/ 1000;
-    final endTimestamp = end.millisecondsSinceEpoch ~/ 1000;
+    final historyData = <int>[];
+    final completer = Completer<RuuviMeasurement>();
+    StreamSubscription? subscription;
+    Timer? timeoutTimer;
 
-    // Create log reader
-    final logReader = RuuviLogReader(_sendCommand, _responseController.stream);
+    try {
+      // Set up timeout
+      timeoutTimer = Timer(timeout, () {
+        if (!completer.isCompleted) {
+          print('⏰ RuuviDevice: History read timeout after ${timeout.inSeconds} seconds');
+          completer.completeError(
+            RuuviDataException('History read timeout after ${timeout.inSeconds} seconds'),
+          );
+        }
+      });
 
-    // Read environmental data
-    return await logReader.readEnvironmentalData(
-      startTime: startTimestamp,
-      endTime: endTimestamp,
-      deviceId: device.remoteId.str,
-      timeout: timeout,
-    );
+      // Listen for responses
+      subscription = _rxCharacteristic!.lastValueStream.listen((data) {
+        if (data.isNotEmpty) {
+          print('📥 RuuviDevice: Received ${data.length} bytes: ${data.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
+          historyData.addAll(data);
+
+          // Check if we have complete 10-byte entries
+          if (historyData.length >= 10 && historyData.length % 10 == 0) {
+            // Try to parse what we have so far
+            final currentData = Uint8List.fromList(historyData);
+            if (RuuviHistoryParser.isValidHistoryData(currentData)) {
+              print('✅ RuuviDevice: Received valid history data, continuing...');
+            }
+          }
+        }
+      });
+
+      // Send history command (try 0x03 first)
+      final historyCommand = Uint8List.fromList([0x03]);
+      print('📤 RuuviDevice: Sending history command: 0x03');
+      await _sendCommand(historyCommand);
+
+      // Wait a bit for initial response
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // If no data received, try alternative commands
+      if (historyData.isEmpty) {
+        print('📤 RuuviDevice: No response to 0x03, trying 0x05...');
+        final altCommand1 = Uint8List.fromList([0x05]);
+        await _sendCommand(altCommand1);
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      if (historyData.isEmpty) {
+        print('📤 RuuviDevice: No response to 0x05, trying 0x80...');
+        final altCommand2 = Uint8List.fromList([0x80]);
+        await _sendCommand(altCommand2);
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      // Wait for more data or timeout
+      await Future.delayed(Duration(seconds: timeout.inSeconds - 2));
+
+      if (!completer.isCompleted) {
+        // Process collected data
+        if (historyData.isNotEmpty) {
+          print('📊 RuuviDevice: Processing ${historyData.length} bytes of collected data');
+          final parsedData = RuuviHistoryParser.parseHistoryData(Uint8List.fromList(historyData), device.remoteId.str);
+
+          final now = DateTime.now();
+          final measurement = RuuviMeasurement(
+            measurements: parsedData,
+            startTime: parsedData.isNotEmpty ? parsedData.first.timestamp : now,
+            endTime: parsedData.isNotEmpty ? parsedData.last.timestamp : now,
+            totalCount: parsedData.length,
+          );
+
+          completer.complete(measurement);
+        } else {
+          completer.completeError(
+            RuuviDataException('No historical data received from device'),
+          );
+        }
+      }
+
+    } catch (e) {
+      if (!completer.isCompleted) {
+        print('❌ RuuviDevice: Error during history retrieval: $e');
+        completer.completeError(RuuviDataException('Failed to retrieve historical data: $e'));
+      }
+    } finally {
+      subscription?.cancel();
+      timeoutTimer?.cancel();
+    }
+
+    return completer.future;
   }
 
   /// Disconnects from the device
@@ -393,7 +468,7 @@ class RuuviDevice {
   /// [data] the command data to send (max 20 bytes)
   /// Throws [RuuviConnectionException] if not connected or send fails
   Future<void> _sendCommand(Uint8List data) async {
-    if (!_isConnected || _rxCharacteristic == null) {
+    if (!_isConnected || _txCharacteristic == null) {
       throw RuuviConnectionException('Device not connected');
     }
 
@@ -402,8 +477,11 @@ class RuuviDevice {
     }
 
     try {
-      await _rxCharacteristic!.write(data, withoutResponse: false);
+      print('📤 RuuviDevice: Sending command: ${data.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
+      await _txCharacteristic!.write(data, withoutResponse: false);
+      print('📤 RuuviDevice: Command sent successfully');
     } catch (e) {
+      print('❌ RuuviDevice: Failed to send command: $e');
       throw RuuviConnectionException('Failed to send command: $e');
     }
   }

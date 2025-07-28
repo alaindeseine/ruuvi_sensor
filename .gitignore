@@ -1,5 +1,10 @@
 # private files
 resume-chat.md
+log.txt
+
+# Android
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
 
 # Miscellaneous
 *.class
