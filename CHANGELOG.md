@@ -1,3 +1,11 @@
+## 0.0.2+debug
+
+* Added comprehensive debug logging throughout the scanning process
+* Updated Flutter Blue Plus dependency to 1.35.5
+* Enhanced error reporting and troubleshooting capabilities
+* Detailed traces for scan results, device detection, and data decoding
+* Improved continuous scanning implementation
+
 ## 0.0.1
 
 * Initial release of RuuviSensor package
