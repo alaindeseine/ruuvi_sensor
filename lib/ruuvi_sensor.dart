@@ -1,6 +1,7 @@
 library ruuvi_sensor;
 
 export 'src/ruuvi_scanner.dart';
+export 'src/ruuvi_ble_scanner.dart';
 export 'src/ruuvi_device.dart';
 export 'src/ruuvi_data_decoder.dart';
 export 'src/ruuvi_log_reader.dart';
