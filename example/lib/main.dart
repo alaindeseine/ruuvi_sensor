@@ -313,6 +313,12 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
   String _statusMessage = 'Not connected';
   RuuviMeasurement? _historicalData;
 
+  // Nouvelles variables pour RuuviHistoryReader
+  final RuuviHistoryReader _historyReader = RuuviHistoryReader();
+  RuuviTagInformation? _deviceInformation;
+  RuuviHistoryCollection? _newHistoryData;
+  bool _isLoadingNewHistory = false;
+
   @override
   void dispose() {
     // Disconnect from device if still connected to avoid memory leaks
@@ -469,6 +475,66 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
     }
   }
 
+  // Nouvelle méthode pour lire les informations du device avec RuuviHistoryReader
+  Future<void> _getNewDeviceInfo() async {
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = 'Reading device information with RuuviHistoryReader...';
+    });
+
+    try {
+      final deviceInfo = await _historyReader.getDeviceInformation(widget.device.serialNumber);
+      if (!mounted) return;
+      setState(() {
+        _deviceInformation = deviceInfo;
+        _statusMessage = 'Device info loaded:\n${deviceInfo.getDisplayName()}\nIdentifier: ${deviceInfo.getIdentifier()}\nManufacturer: ${deviceInfo.getManufacturer() ?? 'N/A'}\nModel: ${deviceInfo.getModel() ?? 'N/A'}\nFirmware: ${deviceInfo.getFirmwareVersion() ?? 'N/A'}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Failed to read device info with RuuviHistoryReader: $e';
+      });
+    }
+  }
+
+  // Nouvelle méthode pour récupérer l'historique avec RuuviHistoryReader
+  Future<void> _getNewHistoryData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingNewHistory = true;
+      _statusMessage = 'Reading history with RuuviHistoryReader...\nThis may take several minutes.';
+    });
+
+    try {
+      final history = await _historyReader.getHistory(
+        widget.device.serialNumber,
+        startDate: DateTime.now().subtract(const Duration(days: 1)), // Dernières 24h
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _newHistoryData = history;
+        _isLoadingNewHistory = false;
+        if (history.isNotEmpty) {
+          final averages = history.getAverages();
+          _statusMessage = 'New history loaded: ${history.length} measurements\n'
+              'Time range: ${history.first?.timestamp} to ${history.last?.timestamp}\n'
+              'Avg temp: ${averages['temperature']?.toStringAsFixed(2) ?? 'N/A'}°C\n'
+              'Avg humidity: ${averages['humidity']?.toStringAsFixed(1) ?? 'N/A'}%\n'
+              'Avg pressure: ${averages['pressure']?.toStringAsFixed(1) ?? 'N/A'} hPa';
+        } else {
+          _statusMessage = 'No new history data available';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingNewHistory = false;
+        _statusMessage = 'Failed to read new history: $e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = widget.device.lastData;
@@ -543,7 +609,29 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
                 ),
               ],
             ),
-            
+
+            // Nouvelle rangée de boutons pour RuuviHistoryReader
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _getNewDeviceInfo,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    child: const Text('New Device Info', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isLoadingNewHistory ? null : _getNewHistoryData,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    child: Text(_isLoadingNewHistory ? 'Loading...' : 'New History', style: const TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+
             if (_historicalData != null) ...[
               const SizedBox(height: 24),
               Text(
@@ -569,6 +657,74 @@ class _RuuviDeviceDetailsPageState extends State<RuuviDeviceDetailsPage> {
                       ),
                     );
                   },
+                ),
+              ),
+            ],
+
+            // Affichage des nouvelles données d'historique
+            if (_newHistoryData != null) ...[
+              const SizedBox(height: 24),
+              Text(
+                'New History Data (${_newHistoryData!.length} measurements)',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.orange),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  itemCount: _newHistoryData!.measurements.length,
+                  itemBuilder: (context, index) {
+                    final measurement = _newHistoryData!.measurements[index];
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        measurement.timestamp.toString().substring(0, 19),
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      subtitle: Text(
+                        'T: ${measurement.temperature?.toStringAsFixed(2) ?? 'N/A'}°C, '
+                        'H: ${measurement.humidity?.toStringAsFixed(1) ?? 'N/A'}%, '
+                        'P: ${measurement.pressure?.toStringAsFixed(1) ?? 'N/A'} hPa',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      leading: const Icon(Icons.history, size: 16, color: Colors.orange),
+                    );
+                  },
+                ),
+              ),
+            ],
+
+            // Affichage des informations du device
+            if (_deviceInformation != null) ...[
+              const SizedBox(height: 24),
+              Text(
+                'Device Information (RuuviHistoryReader)',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.green),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  border: Border.all(color: Colors.green.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoRow('Display Name', _deviceInformation!.getDisplayName()),
+                    _buildInfoRow('Identifier', _deviceInformation!.getIdentifier()),
+                    _buildInfoRow('MAC Address', _deviceInformation!.getMacAddress()),
+                    if (_deviceInformation!.getManufacturer() != null)
+                      _buildInfoRow('Manufacturer', _deviceInformation!.getManufacturer()!),
+                    if (_deviceInformation!.getModel() != null)
+                      _buildInfoRow('Model', _deviceInformation!.getModel()!),
+                    if (_deviceInformation!.getFirmwareVersion() != null)
+                      _buildInfoRow('Firmware', _deviceInformation!.getFirmwareVersion()!),
+                    if (_deviceInformation!.getHardwareVersion() != null)
+                      _buildInfoRow('Hardware', _deviceInformation!.getHardwareVersion()!),
+                    _buildInfoRow('Has Serial Number', _deviceInformation!.hasSerialNumber().toString()),
+                  ],
                 ),
               ),
             ],
