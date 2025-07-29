@@ -160,6 +160,22 @@ class _RuuviScannerPageState extends State<RuuviScannerPage> {
       if (!mounted) return;
       setState(() {
         _isBleScanningActive = true;
+        _statusMessage = 'Checking permissions for new BLE system...';
+      });
+
+      // Check permissions first
+      final permissionResult = await RuuviScanner.checkSetup();
+      if (!permissionResult.isReady) {
+        if (!mounted) return;
+        setState(() {
+          _statusMessage = 'BLE Permissions needed:\n${permissionResult.recommendations.join('\n')}';
+          _isBleScanningActive = false;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
         _statusMessage = 'Scanning with new BLE system...';
       });
 
