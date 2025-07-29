@@ -86,18 +86,20 @@ class RuuviBleScanner {
       // Check if device has manufacturer data
       final manufacturerData = device.manufacturerData;
       if (manufacturerData.isEmpty) return;
-      
-      // Look for Ruuvi manufacturer ID (0x0499)
-      Uint8List? ruuviData;
-      for (final entry in manufacturerData.entries) {
-        if (entry.key == _ruuviManufacturerId) {
-          ruuviData = Uint8List.fromList(entry.value);
-          break;
-        }
-      }
-      
-      if (ruuviData == null) return;
-      
+
+      // flutter_reactive_ble provides manufacturerData as Uint8List directly
+      // The first 2 bytes are the manufacturer ID (little-endian)
+      if (manufacturerData.length < 3) return; // Need at least manufacturer ID + 1 data byte
+
+      // Extract manufacturer ID (first 2 bytes, little-endian)
+      final manufacturerId = (manufacturerData[1] << 8) | manufacturerData[0];
+
+      // Check if it's Ruuvi manufacturer ID (0x0499)
+      if (manufacturerId != _ruuviManufacturerId) return;
+
+      // Extract Ruuvi data (skip first 2 bytes which are manufacturer ID)
+      final ruuviData = Uint8List.fromList(manufacturerData.sublist(2));
+
       // Parse Ruuvi data
       final parsedData = _parseRuuviData(ruuviData);
       if (parsedData == null) return;

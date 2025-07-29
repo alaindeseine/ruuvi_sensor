@@ -342,7 +342,7 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.1.0+history-rewrite"
+    version: "0.2.0+dual-ble-system"
   rxdart:
     dependency: transitive
     description:
