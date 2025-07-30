@@ -103,8 +103,9 @@ class RuuviHistoryReader {
   /// [startDate] optional start date (defaults to 7 days ago, null = ALL history)
   /// [endDate] optional end date (defaults to now)
   ///
-  /// **IMPORTANT:** If [startDate] is null, retrieves ALL available history from the RuuviTag.
-  /// Otherwise, only retrieves data since [startDate] (may skip previously read data).
+  /// **IMPORTANT:** If [startDate] is null, retrieves ALL available history from the RuuviTag
+  /// by using a timestamp from 30 days ago. Otherwise, only retrieves data since [startDate]
+  /// (may skip previously read data).
   ///
   /// Returns [RuuviHistoryCollection] with historical measurements
   /// Throws [RuuviConnectionException] if connection fails
@@ -131,9 +132,11 @@ class RuuviHistoryReader {
       // Prepare history command
       final currentTime = (end.millisecondsSinceEpoch / 1000).round();
 
-      // CORRECTION : Si startDate est null, utiliser 0 pour récupérer TOUT l'historique
-      // Sinon le RuuviTag ne renvoie que les "nouvelles" données depuis la dernière lecture
-      final startTime = startDate == null ? 0 : (start.millisecondsSinceEpoch / 1000).round();
+      // CORRECTION : Si startDate est null, utiliser un timestamp très ancien (30 jours)
+      // pour récupérer TOUT l'historique disponible. startTime = 0 (epoch 1970) semble invalide.
+      final startTime = startDate == null
+        ? (DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch / 1000).round()
+        : (start.millisecondsSinceEpoch / 1000).round();
 
       final command = [
         0x3A, 0x3A, 0x11,

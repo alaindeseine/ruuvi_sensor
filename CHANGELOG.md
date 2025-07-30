@@ -1,4 +1,56 @@
-## 0.1.0+history-rewrite
+## 1.0.4+fixed-timestamp-range
+
+* **FIXED**: Use 30-day old timestamp instead of epoch 0 for complete history retrieval
+* **FIXED**: RuuviTag now responds correctly when requesting all available data
+* **IMPROVED**: Better timestamp range handling for getAllHistory() method
+* **COMPATIBLE**: Works with RuuviTag firmware timestamp validation
+
+## 1.0.3+fixed-history-retrieval
+
+* **FIXED**: History retrieval now gets ALL available data instead of only "new" data
+* **IMPROVED**: Added `getAllHistory()` convenience method to retrieve complete history
+* **FIXED**: Corrected startTime parameter - use very old timestamp to get all data
+* **IMPROVED**: Better documentation explaining startDate=null behavior
+* **COMPATIBLE**: Matches Ruuvi Station behavior for complete history retrieval
+
+## 1.0.2+fixed-permissions
+
+* **FIXED**: Added proper BLE permissions handling for flutter_reactive_ble
+* **NEW**: Automatic permission requests for Location, Bluetooth Scan, and Bluetooth Connect
+* **IMPROVED**: Better error messages when permissions are missing
+* **COMPATIBLE**: Works with Android 12+ permission requirements
+
+## 1.0.1+fixed-parsing
+
+* **FIXED**: Corrected manufacturer data parsing for RAWv1 and RAWv2 formats
+* **FIXED**: Proper byte indexing after manufacturer ID extraction
+* **NEW**: Data validation to reject aberrant sensor values
+* **IMPROVED**: Updated flutter_reactive_ble to version 5.4.0
+* **IMPROVED**: Better temperature, humidity, and pressure range validation
+
+## 1.0.0+reactive-ble-only
+
+* **BREAKING CHANGE**: Complete removal of flutter_blue_plus dependency
+* **BREAKING CHANGE**: Removed old RuuviScanner, RuuviDevice, RuuviLogReader classes
+* **NEW**: Clean API with only RuuviBleScanner and RuuviHistoryReader
+* **NEW**: RuuviTagInformation model with device details and serial number detection
+* **NEW**: RuuviHistoryMeasurement and RuuviHistoryCollection models
+* **NEW**: Simplified example app with dual-column interface (devices | history)
+* **IMPROVED**: Single BLE backend (flutter_reactive_ble) for consistency
+* **IMPROVED**: Better separation between scanning and history retrieval
+
+## 0.2.0+dual-ble-system
+
+* **NEW**: Added RuuviHistoryReader class using flutter_reactive_ble
+* **NEW**: Added RuuviBleScanner for device discovery with flutter_reactive_ble
+* **NEW**: RuuviTagInformation model with device metadata
+* **NEW**: RuuviHistoryMeasurement model with sensor data and utilities
+* **NEW**: Dual BLE system support (flutter_blue_plus + flutter_reactive_ble)
+* **NEW**: Enhanced example app with both old and new system testing
+* **IMPROVED**: Better device information reading (serial number, firmware, etc.)
+* **IMPROVED**: Complete history retrieval with proper Ruuvi Log Response parsing
+
+## 0.1.0+history-rewrite (Legacy)
 
 * **MAJOR REWRITE**: Complete overhaul of historical data retrieval for firmware 3.31.1+
 * **BREAKING CHANGE**: `getStoredData()` now uses Cut-RAWv2 format instead of old protocol
@@ -11,67 +63,6 @@
 * **NEW**: Proper Cut-RAWv2 data validation and range checking
 * **IMPROVED**: Enhanced debugging and logging throughout the process
 * **COMPATIBLE**: Works with RuuviTag firmware 3.31.1+ (Cut-RAWv2 format)
-
-## 0.0.9+device-info-fix
-
-* **IMPROVED**: Better Device Information Service (180A) reading
-* Correctly searches for characteristics using UUID contains() method
-* Added `readDeviceInformationService()` method for comprehensive device info
-* Reads serial number (2A25), firmware (2A26), hardware (2A27), manufacturer (2A29), model (2A24)
-* Enhanced debugging with detailed logging of available services/characteristics
-* Improved error handling and fallback mechanisms
-* Better user feedback when Device Information Service is not available
-
-## 0.0.8+serial-number
-
-* **NEW FEATURE**: Added dedicated serial number reading capability
-* Correctly reads serial number from Device Information Service (UUID 0x2A25)
-* Added `readSerialNumber()` method to RuuviDevice class
-* Fallback to device ID if Device Information Service not available
-* Added "Serial" button in example app for quick serial number access
-* Improved device identification for firmware 3.31.1 compatibility
-
-## 0.0.7+device-info
-
-* **NEW FEATURE**: Added device information reading capability
-* Read firmware version, hardware version, manufacturer name from GATT
-* Added `readDeviceInfo()` method to RuuviDevice class
-* Added "Device Info" button in example app to test functionality
-* Helps identify firmware version for protocol compatibility
-
-## 0.0.6+scan-fix
-
-* **CRITICAL FIX**: Fixed "Scan Once" continuing to scan indefinitely
-* Properly manage scan state listeners and subscriptions
-* Clean up resources on scan completion and errors
-* Added `isActuallyScanning` method for debugging scan state
-* Improved error handling in scan operations
-
-## 0.0.5+ui-precision
-
-* **UI FIX**: Temperature now displays with 2 decimal places in the user interface
-* Updated example app, documentation, and all temperature displays for consistency
-* Better temperature monitoring with precise real-time updates
-
-## 0.0.4+precision
-
-* Improved temperature display precision to 2 decimal places for better monitoring
-* Enhanced debug logs for better temperature change visibility
-
-## 0.0.3+fix
-
-* **CRITICAL FIX**: Fixed UI not updating with real-time sensor data
-* Now properly notifies listeners when existing device data changes
-* Real-time temperature, humidity, and pressure updates now work correctly
-* Continuous scanning mode now fully functional
-
-## 0.0.2+debug
-
-* Added comprehensive debug logging throughout the scanning process
-* Updated Flutter Blue Plus dependency to 1.35.5
-* Enhanced error reporting and troubleshooting capabilities
-* Detailed traces for scan results, device detection, and data decoding
-* Improved continuous scanning implementation
 
 ## 0.0.1
 
