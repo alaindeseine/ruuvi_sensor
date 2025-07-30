@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'exceptions/ruuvi_exceptions.dart';
 
 /// Scanner for RuuviTag devices using flutter_reactive_ble
@@ -36,6 +37,9 @@ class RuuviBleScanner {
     }
 
     try {
+      // Check and request permissions
+      await _checkPermissions();
+
       _isScanning = true;
       _discoveredDevices.clear();
       _devicesController.add([]);
@@ -222,6 +226,33 @@ class RuuviBleScanner {
     };
   }
   
+  /// Checks and requests necessary permissions for BLE scanning
+  Future<void> _checkPermissions() async {
+    // Check location permission (required for BLE scanning on Android)
+    final locationStatus = await Permission.location.status;
+    if (!locationStatus.isGranted) {
+      final result = await Permission.location.request();
+      if (!result.isGranted) {
+        throw RuuviException('Location permission is required for BLE scanning');
+      }
+    }
+
+    // Check Bluetooth permissions (Android 12+)
+    if (await Permission.bluetoothScan.isDenied) {
+      final result = await Permission.bluetoothScan.request();
+      if (!result.isGranted) {
+        throw RuuviException('Bluetooth scan permission is required');
+      }
+    }
+
+    if (await Permission.bluetoothConnect.isDenied) {
+      final result = await Permission.bluetoothConnect.request();
+      if (!result.isGranted) {
+        throw RuuviException('Bluetooth connect permission is required');
+      }
+    }
+  }
+
   /// Disposes the scanner and cleans up resources
   void dispose() {
     stopScan();
