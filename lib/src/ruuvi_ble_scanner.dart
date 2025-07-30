@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'exceptions/ruuvi_exceptions.dart';
-import 'ruuvi_permissions.dart';
 
 /// Scanner for RuuviTag devices using flutter_reactive_ble
 class RuuviBleScanner {
@@ -37,12 +36,6 @@ class RuuviBleScanner {
     }
 
     try {
-      // Check permissions first
-      final permissionResult = await RuuviPermissions.checkPermissions();
-      if (!permissionResult.isReady) {
-        throw RuuviException('Permissions not granted: ${permissionResult.missingPermissions.join(", ")}');
-      }
-
       _isScanning = true;
       _discoveredDevices.clear();
       _devicesController.add([]);
