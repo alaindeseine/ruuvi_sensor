@@ -14,6 +14,10 @@ class RuuviHistoryReader {
   static final Uuid _rxCharacteristicUuid = Uuid.parse('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
   static final Uuid _txCharacteristicUuid = Uuid.parse('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
 
+  // Track active connections and subscriptions to prevent crashes
+  final Map<String, StreamSubscription> _activeSubscriptions = {};
+  final Map<String, StreamSubscription> _activeConnections = {};
+
   // Device Information Service UUIDs (for reference)
   // static final Uuid _deviceInfoServiceUuid = Uuid.parse('0000180a-0000-1000-8000-00805f9b34fb');
 
@@ -116,12 +120,25 @@ class RuuviHistoryReader {
     DateTime? endDate,
   }) async {
     final measurements = <RuuviHistoryMeasurement>[];
-    
+
     try {
+      // Clean up any existing connections for this device
+      await _cleanupDevice(deviceId);
+
       // Connect to device
-      _ble.connectToDevice(
+      final connectionStream = _ble.connectToDevice(
         id: deviceId,
         connectionTimeout: const Duration(seconds: 10),
+      );
+
+      // Track connection
+      _activeConnections[deviceId] = connectionStream.listen(
+        (connectionState) {
+          // Connection state changes are handled here
+        },
+        onError: (error) {
+          // Handle connection errors
+        },
       );
 
       // Prepare time range
@@ -214,6 +231,9 @@ class RuuviHistoryReader {
         },
       );
 
+      // Track subscription
+      _activeSubscriptions[deviceId] = subscription;
+
       // Send history command
       final txCharacteristic = QualifiedCharacteristic(
         serviceId: _nusServiceUuid,
@@ -230,6 +250,9 @@ class RuuviHistoryReader {
       silenceTimer.cancel();
       globalTimer.cancel();
       await subscription.cancel();
+
+      // Clean up tracked connections
+      await _cleanupDevice(deviceId);
 
       // Convert grouped measurements to RuuviHistoryMeasurement objects
       for (final entry in measurementGroups.entries) {
@@ -474,6 +497,33 @@ class RuuviHistoryReader {
 
     } catch (e) {
       return null;
+    }
+  }
+
+  /// Cleans up active connections and subscriptions for a device
+  Future<void> _cleanupDevice(String deviceId) async {
+    try {
+      // Cancel active subscription
+      final subscription = _activeSubscriptions.remove(deviceId);
+      if (subscription != null) {
+        await subscription.cancel();
+      }
+
+      // Cancel active connection
+      final connection = _activeConnections.remove(deviceId);
+      if (connection != null) {
+        await connection.cancel();
+      }
+    } catch (e) {
+      // Ignore cleanup errors to prevent cascading failures
+    }
+  }
+
+  /// Disposes all active connections and subscriptions
+  Future<void> dispose() async {
+    final deviceIds = [..._activeSubscriptions.keys, ..._activeConnections.keys];
+    for (final deviceId in deviceIds) {
+      await _cleanupDevice(deviceId);
     }
   }
 }

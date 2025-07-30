@@ -35,9 +35,10 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
   List<RuuviBleScanResult> _discoveredTags = [];
   List<RuuviHistoryMeasurement> _historyData = [];
   RuuviBleScanResult? _selectedTag;
-  
+
   bool _isScanning = false;
   bool _isLoadingHistory = false;
+  String _activeButton = ''; // Track which button is active
   String _statusMessage = 'Ready to scan for RuuviTags';
 
   @override
@@ -96,6 +97,7 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
       setState(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
+        _activeButton = 'all_${tag.deviceId}';
         _statusMessage = 'Loading ALL history for ${tag.displayName}...';
         _historyData.clear();
       });
@@ -105,12 +107,14 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
 
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _historyData = history.measurements;
         _statusMessage = 'ALL History loaded: ${_historyData.length} measurements for ${tag.displayName}';
       });
     } catch (e) {
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _statusMessage = 'ALL History error: $e';
       });
     }
@@ -151,6 +155,7 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
       setState(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
+        _activeButton = 'date_${tag.deviceId}';
         _statusMessage = 'Loading history from ${startDateTime.toString().substring(0, 16)} for ${tag.displayName}...';
         _historyData.clear();
       });
@@ -163,12 +168,14 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
 
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _historyData = history.measurements;
         _statusMessage = 'History from ${startDateTime.toString().substring(0, 16)}: ${_historyData.length} measurements for ${tag.displayName}';
       });
     } catch (e) {
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _statusMessage = 'History from date error: $e';
       });
     }
@@ -179,6 +186,7 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
       setState(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
+        _activeButton = 'epoch_${tag.deviceId}';
         _statusMessage = 'Testing history from EPOCH (1970) for ${tag.displayName}...';
         _historyData.clear();
       });
@@ -188,12 +196,14 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
 
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _historyData = history.measurements;
         _statusMessage = 'EPOCH History: ${_historyData.length} measurements for ${tag.displayName}';
       });
     } catch (e) {
       setState(() {
         _isLoadingHistory = false;
+        _activeButton = '';
         _statusMessage = 'EPOCH History error: $e';
       });
     }
@@ -271,27 +281,72 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
                                        'P: ${(tag.pressure! / 100).toStringAsFixed(0)} hPa'),
                               ],
                             ),
-                            trailing: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ElevatedButton(
-                                  onPressed: _isLoadingHistory ? null : () => _getAllHistory(tag),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                  child: const Text('All History', style: TextStyle(fontSize: 9)),
-                                ),
-                                const SizedBox(height: 2),
-                                ElevatedButton(
-                                  onPressed: _isLoadingHistory ? null : () => _getHistoryFromDate(tag),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                                  child: const Text('From Date', style: TextStyle(fontSize: 9)),
-                                ),
-                                const SizedBox(height: 2),
-                                ElevatedButton(
-                                  onPressed: _isLoadingHistory ? null : () => _getHistoryFromEpoch(tag),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('From Epoch', style: TextStyle(fontSize: 9)),
-                                ),
-                              ],
+                            trailing: SizedBox(
+                              width: 200,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: _isLoadingHistory ? null : () => _getAllHistory(tag),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                      ),
+                                      child: _activeButton == 'all_${tag.deviceId}'
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : const Text('All', style: TextStyle(fontSize: 8)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: _isLoadingHistory ? null : () => _getHistoryFromDate(tag),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.orange,
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                      ),
+                                      child: _activeButton == 'date_${tag.deviceId}'
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : const Text('Date', style: TextStyle(fontSize: 8)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: _isLoadingHistory ? null : () => _getHistoryFromEpoch(tag),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                      ),
+                                      child: _activeButton == 'epoch_${tag.deviceId}'
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : const Text('Epoch', style: TextStyle(fontSize: 8)),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             leading: Icon(
                               Icons.bluetooth,
