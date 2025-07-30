@@ -91,28 +91,110 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
     }
   }
 
-  Future<void> _getHistory(RuuviBleScanResult tag) async {
+  Future<void> _getAllHistory(RuuviBleScanResult tag) async {
     try {
       setState(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
-        _statusMessage = 'Loading history for ${tag.displayName}...';
+        _statusMessage = 'Loading ALL history for ${tag.displayName}...';
         _historyData.clear();
       });
 
-      // Récupérer TOUT l'historique disponible (jusqu'à 10 jours)
-      // Note: utiliser startDate = null pour récupérer toutes les données
+      // Récupérer TOUT l'historique disponible avec startDate = null
       final history = await _historyReader.getAllHistory(tag.deviceId);
 
       setState(() {
         _isLoadingHistory = false;
         _historyData = history.measurements;
-        _statusMessage = 'History loaded: ${_historyData.length} measurements for ${tag.displayName}';
+        _statusMessage = 'ALL History loaded: ${_historyData.length} measurements for ${tag.displayName}';
       });
     } catch (e) {
       setState(() {
         _isLoadingHistory = false;
-        _statusMessage = 'History error: $e';
+        _statusMessage = 'ALL History error: $e';
+      });
+    }
+  }
+
+  Future<void> _getHistoryFromDate(RuuviBleScanResult tag) async {
+    // Demander une date à l'utilisateur
+    final DateTime? selectedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 1)),
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now(),
+    );
+
+    if (selectedDate == null) return;
+
+    // Vérifier que le widget est encore monté
+    if (!mounted) return;
+
+    // Demander une heure
+    final TimeOfDay? selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(selectedDate),
+    );
+
+    if (selectedTime == null) return;
+
+    // Combiner date et heure
+    final DateTime startDateTime = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+      selectedTime.hour,
+      selectedTime.minute,
+    );
+
+    try {
+      setState(() {
+        _isLoadingHistory = true;
+        _selectedTag = tag;
+        _statusMessage = 'Loading history from ${startDateTime.toString().substring(0, 16)} for ${tag.displayName}...';
+        _historyData.clear();
+      });
+
+      // Récupérer l'historique depuis la date spécifiée
+      final history = await _historyReader.getHistory(
+        tag.deviceId,
+        startDate: startDateTime,
+      );
+
+      setState(() {
+        _isLoadingHistory = false;
+        _historyData = history.measurements;
+        _statusMessage = 'History from ${startDateTime.toString().substring(0, 16)}: ${_historyData.length} measurements for ${tag.displayName}';
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingHistory = false;
+        _statusMessage = 'History from date error: $e';
+      });
+    }
+  }
+
+  Future<void> _getHistoryFromEpoch(RuuviBleScanResult tag) async {
+    try {
+      setState(() {
+        _isLoadingHistory = true;
+        _selectedTag = tag;
+        _statusMessage = 'Testing history from EPOCH (1970) for ${tag.displayName}...';
+        _historyData.clear();
+      });
+
+      // Tester avec startTime = 0 (epoch)
+      final history = await _historyReader.getHistoryFromEpoch(tag.deviceId);
+
+      setState(() {
+        _isLoadingHistory = false;
+        _historyData = history.measurements;
+        _statusMessage = 'EPOCH History: ${_historyData.length} measurements for ${tag.displayName}';
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingHistory = false;
+        _statusMessage = 'EPOCH History error: $e';
       });
     }
   }
@@ -189,10 +271,27 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
                                        'P: ${(tag.pressure! / 100).toStringAsFixed(0)} hPa'),
                               ],
                             ),
-                            trailing: ElevatedButton(
-                              onPressed: _isLoadingHistory ? null : () => _getHistory(tag),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                              child: const Text('Get History'),
+                            trailing: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ElevatedButton(
+                                  onPressed: _isLoadingHistory ? null : () => _getAllHistory(tag),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                                  child: const Text('All History', style: TextStyle(fontSize: 9)),
+                                ),
+                                const SizedBox(height: 2),
+                                ElevatedButton(
+                                  onPressed: _isLoadingHistory ? null : () => _getHistoryFromDate(tag),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                                  child: const Text('From Date', style: TextStyle(fontSize: 9)),
+                                ),
+                                const SizedBox(height: 2),
+                                ElevatedButton(
+                                  onPressed: _isLoadingHistory ? null : () => _getHistoryFromEpoch(tag),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                  child: const Text('From Epoch', style: TextStyle(fontSize: 9)),
+                                ),
+                              ],
                             ),
                             leading: Icon(
                               Icons.bluetooth,

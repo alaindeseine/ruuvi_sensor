@@ -273,6 +273,155 @@ class RuuviHistoryReader {
     return getHistory(deviceId, startDate: null, endDate: endDate);
   }
 
+  /// TEST: Reads history with startTime = 0 (epoch)
+  ///
+  /// This method forces startTime = 0 to test if the RuuviTag responds
+  /// to epoch timestamp requests.
+  ///
+  /// [deviceId] MAC address of the RuuviTag
+  /// [endDate] optional end date (defaults to now)
+  ///
+  /// Returns [RuuviHistoryCollection] with historical measurements
+  Future<RuuviHistoryCollection> getHistoryFromEpoch(
+    String deviceId, {
+    DateTime? endDate,
+  }) async {
+    final measurements = <RuuviHistoryMeasurement>[];
+
+    try {
+      // Connect to device
+      _ble.connectToDevice(
+        id: deviceId,
+        connectionTimeout: const Duration(seconds: 10),
+      );
+
+      // Prepare time range
+      final now = DateTime.now();
+      final end = endDate ?? now;
+
+      // Prepare history command with startTime = 0 (epoch)
+      final currentTime = (end.millisecondsSinceEpoch / 1000).round();
+      final startTime = 0; // Force epoch
+
+      final command = [
+        0x3A, 0x3A, 0x11,
+        (currentTime >> 24) & 0xFF, (currentTime >> 16) & 0xFF,
+        (currentTime >> 8) & 0xFF, currentTime & 0xFF,
+        (startTime >> 24) & 0xFF, (startTime >> 16) & 0xFF,
+        (startTime >> 8) & 0xFF, startTime & 0xFF,
+      ];
+
+      // Setup completion detection
+      final completer = Completer<void>();
+      DateTime lastDataReceived = DateTime.now();
+
+      // Temporary storage for grouping measurements by timestamp
+      final Map<int, Map<String, double>> measurementGroups = {};
+
+      // Timer for silence detection
+      Timer silenceTimer;
+      silenceTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+        final silenceDuration = DateTime.now().difference(lastDataReceived);
+        if (silenceDuration.inSeconds > 10) {
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+          timer.cancel();
+        }
+      });
+
+      // Global timeout timer
+      Timer globalTimer;
+      globalTimer = Timer(const Duration(seconds: 120), () {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        silenceTimer.cancel();
+      });
+
+      // Subscribe to notifications
+      final characteristic = QualifiedCharacteristic(
+        serviceId: _nusServiceUuid,
+        characteristicId: _txCharacteristicUuid,
+        deviceId: deviceId,
+      );
+
+      final subscription = _ble.subscribeToCharacteristic(characteristic).listen(
+        (data) {
+          lastDataReceived = DateTime.now();
+
+          // Parse Ruuvi Log Response (11 bytes)
+          if (data.length == 11) {
+            final parsedData = _parseRuuviLogResponse(Uint8List.fromList(data));
+            if (parsedData != null) {
+              if (parsedData['isEndMarker'] == true) {
+                // End of history detected
+                if (!completer.isCompleted) {
+                  completer.complete();
+                }
+                return;
+              }
+
+              // Group measurements by timestamp
+              final timestamp = parsedData['timestamp'] as int;
+              final sensorType = parsedData['sensorType'] as String;
+              final value = parsedData['value'] as double;
+
+              measurementGroups[timestamp] ??= {};
+              measurementGroups[timestamp]![sensorType] = value;
+            }
+          }
+        },
+        onError: (error) {
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+        },
+      );
+
+      // Send history command
+      final txCharacteristic = QualifiedCharacteristic(
+        serviceId: _nusServiceUuid,
+        characteristicId: _rxCharacteristicUuid,
+        deviceId: deviceId,
+      );
+
+      await _ble.writeCharacteristicWithoutResponse(txCharacteristic, value: command);
+
+      // Wait for completion
+      await completer.future;
+
+      // Clean up timers and subscription
+      silenceTimer.cancel();
+      globalTimer.cancel();
+      await subscription.cancel();
+
+      // Convert grouped measurements to RuuviHistoryMeasurement objects
+      for (final entry in measurementGroups.entries) {
+        final timestamp = DateTime.fromMillisecondsSinceEpoch(entry.key * 1000);
+        final values = entry.value;
+
+        measurements.add(RuuviHistoryMeasurement(
+          timestamp: timestamp,
+          temperature: values['temperature'],
+          humidity: values['humidity'],
+          pressure: values['pressure'],
+        ));
+      }
+
+      // Sort by timestamp
+      measurements.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+      return RuuviHistoryCollection(
+        measurements: measurements,
+        deviceId: deviceId,
+      );
+
+    } catch (e) {
+      throw RuuviConnectionException('Failed to read history from epoch: $e');
+    }
+  }
+
   /// Parses a Ruuvi Log Response packet (11 bytes)
   Map<String, dynamic>? _parseRuuviLogResponse(Uint8List data) {
     if (data.length != 11) return null;
