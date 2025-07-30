@@ -104,14 +104,24 @@ class RuuviBleScanner {
       final parsedData = _parseRuuviData(ruuviData);
       if (parsedData == null) return;
       
+      // Validate parsed data ranges
+      final temperature = parsedData['temperature'] as double?;
+      final humidity = parsedData['humidity'] as double?;
+      final pressure = parsedData['pressure'] as double?;
+
+      // Skip if values are clearly invalid
+      if (temperature != null && (temperature < -40 || temperature > 85)) return;
+      if (humidity != null && (humidity < 0 || humidity > 100)) return;
+      if (pressure != null && (pressure < 30000 || pressure > 110000)) return; // 300-1100 hPa in Pa
+
       // Create or update scan result
       final scanResult = RuuviBleScanResult(
         deviceId: device.id,
         name: device.name.isNotEmpty ? device.name : 'Ruuvi ${device.id.substring(device.id.length - 4)}',
         rssi: device.rssi,
-        temperature: parsedData['temperature'],
-        humidity: parsedData['humidity'],
-        pressure: parsedData['pressure'],
+        temperature: temperature,
+        humidity: humidity,
+        pressure: pressure,
         batteryVoltage: parsedData['batteryVoltage'],
         dataFormat: parsedData['dataFormat'],
         lastSeen: DateTime.now(),
@@ -155,21 +165,22 @@ class RuuviBleScanner {
   /// Parses RAWv1 format (0x03)
   Map<String, dynamic> _parseRAWv1(Uint8List data) {
     if (data.length < 14) return {};
-    
+
     final buffer = ByteData.sublistView(data);
-    
-    // Temperature (bytes 2-3, signed, big-endian)
-    final tempRaw = buffer.getInt16(2, Endian.big);
+
+    // Format RAWv1: [0x03][temp_h][temp_l][hum_h][hum_l][pres_h][pres_l]...
+    // Temperature (bytes 1-2, signed, big-endian)
+    final tempRaw = buffer.getInt16(1, Endian.big);
     final temperature = tempRaw / 100.0;
-    
-    // Humidity (bytes 4-5, unsigned, big-endian)
-    final humidityRaw = buffer.getUint16(4, Endian.big);
+
+    // Humidity (bytes 3-4, unsigned, big-endian)
+    final humidityRaw = buffer.getUint16(3, Endian.big);
     final humidity = humidityRaw / 100.0;
-    
-    // Pressure (bytes 6-7, unsigned, big-endian)
-    final pressureRaw = buffer.getUint16(6, Endian.big);
+
+    // Pressure (bytes 5-6, unsigned, big-endian)
+    final pressureRaw = buffer.getUint16(5, Endian.big);
     final pressure = pressureRaw + 50000.0; // Pa
-    
+
     return {
       'dataFormat': 0x03,
       'temperature': temperature,
@@ -182,25 +193,26 @@ class RuuviBleScanner {
   /// Parses RAWv2 format (0x05)
   Map<String, dynamic> _parseRAWv2(Uint8List data) {
     if (data.length < 24) return {};
-    
+
     final buffer = ByteData.sublistView(data);
-    
-    // Temperature (bytes 3-4, signed, big-endian)
-    final tempRaw = buffer.getInt16(3, Endian.big);
+
+    // Format RAWv2: [0x05][temp_h][temp_l][hum_h][hum_l][pres_h][pres_l]...
+    // Temperature (bytes 1-2, signed, big-endian, 0.005°C resolution)
+    final tempRaw = buffer.getInt16(1, Endian.big);
     final temperature = tempRaw * 0.005;
-    
-    // Humidity (bytes 5-6, unsigned, big-endian)
-    final humidityRaw = buffer.getUint16(5, Endian.big);
+
+    // Humidity (bytes 3-4, unsigned, big-endian, 0.0025% resolution)
+    final humidityRaw = buffer.getUint16(3, Endian.big);
     final humidity = humidityRaw * 0.0025;
-    
-    // Pressure (bytes 7-8, unsigned, big-endian)
-    final pressureRaw = buffer.getUint16(7, Endian.big);
+
+    // Pressure (bytes 5-6, unsigned, big-endian, 1 Pa resolution, offset +50000 Pa)
+    final pressureRaw = buffer.getUint16(5, Endian.big);
     final pressure = (pressureRaw + 50000.0); // Pa
-    
-    // Battery voltage (bytes 15-16, unsigned, big-endian)
-    final batteryRaw = buffer.getUint16(15, Endian.big);
+
+    // Battery voltage (bytes 13-14, unsigned, big-endian)
+    final batteryRaw = buffer.getUint16(13, Endian.big);
     final batteryVoltage = (batteryRaw >> 5) + 1600; // mV
-    
+
     return {
       'dataFormat': 0x05,
       'temperature': temperature,

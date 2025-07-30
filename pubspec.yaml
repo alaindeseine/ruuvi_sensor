@@ -1,6 +1,6 @@
 name: ruuvi_sensor
 description: "A Flutter package for interfacing with Ruuvi environmental sensors via Bluetooth Low Energy."
-version: 1.0.0+reactive-ble-only
+version: 1.0.1+fixed-parsing
 homepage: https://github.com/alaindeseine/ruuvi_sensor
 repository: https://github.com/alaindeseine/ruuvi_sensor
 issue_tracker: https://github.com/alaindeseine/ruuvi_sensor/issues
@@ -13,7 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
 
-  flutter_reactive_ble: ^5.3.1
+  flutter_reactive_ble: ^5.4.0
   convert: ^3.1.2
 
 dev_dependencies:
