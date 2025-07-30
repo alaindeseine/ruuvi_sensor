@@ -100,11 +100,9 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
         _historyData.clear();
       });
 
-      // Récupérer l'historique des dernières 24h
-      final history = await _historyReader.getHistory(
-        tag.deviceId,
-        startDate: DateTime.now().subtract(const Duration(days: 1)),
-      );
+      // Récupérer TOUT l'historique disponible (jusqu'à 10 jours)
+      // Note: utiliser startDate = null pour récupérer toutes les données
+      final history = await _historyReader.getAllHistory(tag.deviceId);
 
       setState(() {
         _isLoadingHistory = false;

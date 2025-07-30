@@ -100,8 +100,11 @@ class RuuviHistoryReader {
   /// Reads historical data from a RuuviTag
   ///
   /// [deviceId] MAC address of the RuuviTag
-  /// [startDate] optional start date (defaults to 7 days ago)
+  /// [startDate] optional start date (defaults to 7 days ago, null = ALL history)
   /// [endDate] optional end date (defaults to now)
+  ///
+  /// **IMPORTANT:** If [startDate] is null, retrieves ALL available history from the RuuviTag.
+  /// Otherwise, only retrieves data since [startDate] (may skip previously read data).
   ///
   /// Returns [RuuviHistoryCollection] with historical measurements
   /// Throws [RuuviConnectionException] if connection fails
@@ -127,7 +130,10 @@ class RuuviHistoryReader {
 
       // Prepare history command
       final currentTime = (end.millisecondsSinceEpoch / 1000).round();
-      final startTime = (start.millisecondsSinceEpoch / 1000).round();
+
+      // CORRECTION : Si startDate est null, utiliser 0 pour récupérer TOUT l'historique
+      // Sinon le RuuviTag ne renvoie que les "nouvelles" données depuis la dernière lecture
+      final startTime = startDate == null ? 0 : (start.millisecondsSinceEpoch / 1000).round();
 
       final command = [
         0x3A, 0x3A, 0x11,
@@ -246,6 +252,22 @@ class RuuviHistoryReader {
     } catch (e) {
       throw RuuviConnectionException('Failed to read history: $e');
     }
+  }
+
+  /// Reads ALL available historical data from a RuuviTag
+  ///
+  /// This is a convenience method that calls getHistory() with startDate = null
+  /// to ensure ALL available data is retrieved from the RuuviTag's memory.
+  ///
+  /// [deviceId] MAC address of the RuuviTag
+  /// [endDate] optional end date (defaults to now)
+  ///
+  /// Returns [RuuviHistoryCollection] with ALL historical measurements
+  Future<RuuviHistoryCollection> getAllHistory(
+    String deviceId, {
+    DateTime? endDate,
+  }) async {
+    return getHistory(deviceId, startDate: null, endDate: endDate);
   }
 
   /// Parses a Ruuvi Log Response packet (11 bytes)
