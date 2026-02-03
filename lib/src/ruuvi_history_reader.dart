@@ -125,21 +125,44 @@ class RuuviHistoryReader {
       // Clean up any existing connections for this device
       await _cleanupDevice(deviceId);
 
-      // Connect to device
+      // Connect to device and wait for connected state
       final connectionStream = _ble.connectToDevice(
         id: deviceId,
         connectionTimeout: const Duration(seconds: 10),
       );
 
-      // Track connection
+      // Wait for connection to be established
+      final connectionCompleter = Completer<bool>();
+
       _activeConnections[deviceId] = connectionStream.listen(
         (connectionState) {
-          // Connection state changes are handled here
+          if (connectionState.connectionState == DeviceConnectionState.connected) {
+            if (!connectionCompleter.isCompleted) {
+              connectionCompleter.complete(true);
+            }
+          } else if (connectionState.connectionState == DeviceConnectionState.disconnected) {
+            if (!connectionCompleter.isCompleted) {
+              connectionCompleter.complete(false);
+            }
+          }
         },
         onError: (error) {
-          // Handle connection errors
+          if (!connectionCompleter.isCompleted) {
+            connectionCompleter.complete(false);
+          }
         },
       );
+
+      // Wait for connection with timeout
+      final isConnected = await connectionCompleter.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => false,
+      );
+
+      if (!isConnected) {
+        await _cleanupDevice(deviceId);
+        throw RuuviConnectionException('Failed to connect to device $deviceId');
+      }
 
       // Prepare time range
       final now = DateTime.now();
