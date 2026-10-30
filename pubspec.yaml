@@ -1,9 +1,15 @@
 name: ruuvi_sensor
-description: "A Flutter package for interfacing with Ruuvi environmental sensors via Bluetooth Low Energy."
-version: 1.0.8+fixed-sensor-detection
-homepage: https://github.com/alaindeseine/ruuvi_sensor
+description: "Scan RuuviTag environmental sensors over Bluetooth Low Energy and download their logged temperature, humidity and pressure history."
+version: 1.1.0
+homepage: https://www.cabinfo.eu/
 repository: https://github.com/alaindeseine/ruuvi_sensor
 issue_tracker: https://github.com/alaindeseine/ruuvi_sensor/issues
+topics:
+  - ruuvi
+  - bluetooth
+  - ble
+  - sensor
+  - iot
 
 environment:
   sdk: ^3.8.0

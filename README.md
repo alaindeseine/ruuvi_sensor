@@ -1,331 +1,156 @@
-# RuuviSensor
+# ruuvi_sensor
 
-A Flutter package for interfacing with Ruuvi environmental sensors via Bluetooth Low Energy (BLE). This package allows you to scan for RuuviTag devices, read real-time sensor data from advertisements, connect to devices, and retrieve historical sensor measurements.
+Scan [RuuviTag](https://ruuvi.com/ruuvitag/) environmental sensors over Bluetooth Low Energy and download their logged history.
 
-## Features
+- **Live readings** from advertisements: temperature, humidity, pressure, acceleration, battery voltage, TX power, movement counter, measurement sequence and MAC address (data formats 3 / RAWv1 and 5 / RAWv2).
+- **History download** over GATT (Nordic UART service): every value the tag logged, with a flag telling whether the transfer completed.
+- **Device information**: model, firmware and hardware versions, serial number.
+- Works with stock Ruuvi firmware and with firmwares that only log some sensors: missing values are `null`, never invented.
 
-- **🔍 Device Discovery**: Scan for nearby RuuviTag sensors using BLE
-- **📊 Real-time Data**: Read current temperature, humidity, pressure, and other sensor values from BLE advertisements
-- **🔗 Device Connection**: Connect to RuuviTag devices via Nordic UART Service (NUS)
-- **📈 Historical Data**: Retrieve stored sensor measurements from connected devices
-- **⚡ Format Support**: Full support for Ruuvi data format 5 (RAWv2)
-- **🛡️ Error Handling**: Comprehensive exception handling for connection and data issues
-- **📱 Cross-platform**: Works on both Android and iOS
+Built on [flutter_blue_ultra](https://pub.dev/packages/flutter_blue_ultra) (BSD-3-Clause).
 
-## Supported Sensors
+## Platform support
 
-This package supports RuuviTag sensors with firmware version 3.x or higher that implement:
-- Ruuvi data format 5 (RAWv2) for advertisements
-- Nordic UART Service (NUS) for device communication
-- Historical data logging capabilities
+| Platform | Status |
+|---|---|
+| Android | Supported and tested |
+| iOS | Should work (the BLE layer supports it) but is not tested |
 
-## Getting Started
-
-### Installation
-
-Add this package to your `pubspec.yaml`:
+## Installation
 
 ```yaml
 dependencies:
-  ruuvi_sensor: ^0.0.1
-  flutter_blue_plus: ^1.35.5  # Required peer dependency
+  ruuvi_sensor: ^1.1.0
 ```
 
-### Permissions
+### Android setup
 
-**⚠️ Important**: The package will automatically detect missing permissions and provide detailed setup instructions.
+`permission_handler` requires compiling against Android SDK 37. In `android/app/build.gradle.kts`:
 
-For complete permission setup instructions, see [PERMISSIONS.md](PERMISSIONS.md).
+```kotlin
+android {
+    compileSdk = 37
+}
+```
 
-#### Quick Setup
+Declare the Bluetooth permissions in `android/app/src/main/AndroidManifest.xml`:
 
-**Android** - Add to `android/app/src/main/AndroidManifest.xml`:
 ```xml
-<!-- For Android 12+ -->
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-    android:usesPermissionFlags="neverForLocation" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Android 12+ (API 31+): no location needed -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-<!-- For older versions -->
-<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- Android 11 and below -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    ...
+</manifest>
 ```
 
-**iOS** - Add to `ios/Runner/Info.plist`:
+The package requests the runtime permissions itself when you start a scan or connect to a tag, and throws a `RuuviException` if they are denied or Bluetooth is off.
+
+### iOS setup
+
+Add to `ios/Runner/Info.plist`:
+
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
-<string>This app needs Bluetooth access to scan for RuuviTag sensors</string>
-```
-
-#### Permission Helper
-
-The package includes a built-in permission checker:
-
-```dart
-// Check setup before scanning
-final setupResult = await RuuviScanner.checkSetup();
-if (!setupResult.isReady) {
-  // Show setup instructions
-  print(setupResult.recommendations.join('\n'));
-}
+<string>This app uses Bluetooth to read RuuviTag sensors.</string>
 ```
 
 ## Usage
 
-### Basic Scanning
+### Scan for tags
 
 ```dart
 import 'package:ruuvi_sensor/ruuvi_sensor.dart';
 
-// Create a scanner instance
-final scanner = RuuviScanner();
+final scanner = RuuviBleScanner();
 
-// Listen for discovered devices
-scanner.devicesStream.listen((devices) {
-  for (final device in devices) {
-    print('Found: ${device.name} (${device.serialNumber})');
-
-    // Access real-time sensor data
-    final data = device.lastData;
-    if (data != null) {
-      print('Temperature: ${data.temperature}°C');
-      print('Humidity: ${data.humidity}%');
-      print('Pressure: ${data.pressure} Pa');
-    }
+final subscription = scanner.devicesStream.listen((tags) {
+  for (final tag in tags) {
+    print('${tag.displayName}: ${tag.temperature} °C, '
+        '${tag.humidity} %, ${tag.pressureHPa} hPa, ${tag.batteryVoltage} mV');
   }
 });
 
-// Start scanning
-await scanner.startScan(timeout: Duration(seconds: 30));
+await scanner.startScan(timeout: const Duration(seconds: 30));
 
-// Stop scanning
+// Later
 await scanner.stopScan();
-
-// Clean up
+await subscription.cancel();
 scanner.dispose();
 ```
 
-### Connecting to a Device
+`devicesStream` emits the full list of tags each time an advertisement is received, so several times per second when tags are nearby.
+
+### Read the history
 
 ```dart
-// Get a device from scan results
-final device = devices.first;
+final reader = RuuviHistoryReader();
 
-try {
-  // Connect to the device
-  await device.connect();
-  print('Connected to ${device.name}');
+// Everything the tag kept (the last 30 days)
+final history = await reader.getAllHistory(tag.deviceId);
 
-  // Check connection status
-  if (device.isConnected) {
-    // Device is ready for communication
-  }
+// Or only what was logged since a given date
+final recent = await reader.getHistory(
+  tag.deviceId,
+  startDate: DateTime.now().subtract(const Duration(days: 1)),
+);
 
-} catch (e) {
-  print('Connection failed: $e');
+if (!history.isComplete) {
+  // The transfer stopped early (tag out of range, timeout...).
+  // `history.measurements` holds what was received so far.
 }
+
+for (final m in history.measurements) {
+  print('${m.timestamp}: ${m.temperature} °C');
+}
+
+await reader.dispose();
 ```
 
-### Retrieving Historical Data
+Measurements are sorted oldest first. A value is `null` when the tag doesn't log that sensor: some firmwares only log temperature, in which case `getCompleteOnly()` returns an empty collection.
+
+### Read device information
 
 ```dart
-try {
-  // Get stored data from the last 7 days
-  final measurement = await device.getStoredData(
-    startTime: DateTime.now().subtract(Duration(days: 7)),
-    timeout: Duration(minutes: 5),
-  );
-
-  print('Retrieved ${measurement.totalCount} measurements');
-  print('Time range: ${measurement.startTime} to ${measurement.endTime}');
-
-  // Process individual measurements
-  for (final data in measurement.measurements) {
-    print('${data.timestamp}: ${data.temperature}°C, ${data.humidity}%, ${data.pressure} Pa');
-  }
-
-} catch (e) {
-  print('Failed to get historical data: $e');
-} finally {
-  // Always disconnect when done
-  await device.disconnect();
-}
+final info = await reader.getDeviceInformation(tag.deviceId);
+print('${info.getModel()} ${info.getHardwareVersion()}, '
+    'firmware ${info.getFirmwareVersion()}');
 ```
 
-### Complete Example
+## Units
 
-```dart
-import 'package:flutter/material.dart';
-import 'package:ruuvi_sensor/ruuvi_sensor.dart';
+| Value | Scan (`RuuviBleScanResult`) | History (`RuuviHistoryMeasurement`) |
+|---|---|---|
+| Temperature | °C | °C |
+| Humidity | % | % |
+| Pressure | **Pa** (`pressure`), hPa (`pressureHPa`) | **hPa** |
+| Acceleration | g | — |
+| Battery | mV | — |
 
-class RuuviExample extends StatefulWidget {
-  @override
-  _RuuviExampleState createState() => _RuuviExampleState();
-}
+## Errors
 
-class _RuuviExampleState extends State<RuuviExample> {
-  final RuuviScanner _scanner = RuuviScanner();
-  List<RuuviDevice> _devices = [];
+Every method throws a subclass of `RuuviException`:
 
-  @override
-  void initState() {
-    super.initState();
-    _scanner.devicesStream.listen((devices) {
-      setState(() => _devices = devices);
-    });
-  }
+- `RuuviConnectionException`: the tag can't be reached or the connection failed.
+- `RuuviDataException`: the tag doesn't expose the log service (firmware without GATT history).
+- `RuuviException`: Bluetooth unavailable or turned off, permission denied, scan failure.
 
-  @override
-  void dispose() {
-    _scanner.dispose();
-    super.dispose();
-  }
+Operations on the same tag are queued: calling `getHistory()` while another read of that tag is running waits for it to finish.
 
-  Future<void> _startScan() async {
-    try {
-      await _scanner.startScan(timeout: Duration(seconds: 30));
-    } catch (e) {
-      print('Scan failed: $e');
-    }
-  }
+## Troubleshooting
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text('RuuviTag Scanner')),
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: _startScan,
-            child: Text('Start Scan'),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _devices.length,
-              itemBuilder: (context, index) {
-                final device = _devices[index];
-                final data = device.lastData;
-
-                return ListTile(
-                  title: Text(device.name),
-                  subtitle: data != null
-                      ? Text('${data.temperature.toStringAsFixed(2)}°C, '
-                             '${data.humidity.toStringAsFixed(1)}%, '
-                             '${(data.pressure / 100).toStringAsFixed(0)} hPa')
-                      : Text('No data'),
-                  trailing: Text('${device.rssi} dBm'),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-```
-
-## API Reference
-
-### RuuviScanner
-
-Main class for discovering RuuviTag devices.
-
-#### Methods
-- `startScan({Duration? timeout})` - Start scanning for devices
-- `stopScan()` - Stop the current scan
-- `dispose()` - Clean up resources
-
-#### Properties
-- `devicesStream` - Stream of discovered devices
-- `discoveredDevices` - List of currently discovered devices
-- `isScanning` - Whether currently scanning
-
-### RuuviDevice
-
-Represents a discovered RuuviTag device.
-
-#### Methods
-- `connect()` - Connect to the device
-- `disconnect()` - Disconnect from the device
-- `getStoredData({DateTime? startTime, Duration timeout})` - Retrieve historical data
-
-#### Properties
-- `device` - Underlying BluetoothDevice
-- `serialNumber` - Device serial number (MAC address)
-- `name` - Device display name
-- `rssi` - Signal strength
-- `lastData` - Most recent sensor data
-- `isConnected` - Connection status
-
-### RuuviData
-
-Contains sensor measurement data.
-
-#### Properties
-- `deviceId` - Device identifier
-- `serialNumber` - Device serial number
-- `temperature` - Temperature in Celsius
-- `humidity` - Relative humidity percentage
-- `pressure` - Atmospheric pressure in Pascals
-- `timestamp` - Measurement timestamp
-- `batteryVoltage` - Battery voltage in millivolts
-- `rssi` - Signal strength
-- `accelerationX/Y/Z` - Acceleration values in G
-- `txPower` - Transmission power in dBm
-- `movementCounter` - Movement detection counter
-- `sequenceNumber` - Measurement sequence number
-
-### RuuviMeasurement
-
-Collection of historical measurements.
-
-#### Properties
-- `measurements` - List of RuuviData objects
-- `startTime` - Earliest measurement timestamp
-- `endTime` - Latest measurement timestamp
-- `totalCount` - Total number of measurements
-
-## Error Handling
-
-The package provides specific exception types:
-
-- `RuuviException` - Base exception class
-- `RuuviConnectionException` - Connection-related errors
-- `RuuviDataException` - Data parsing or retrieval errors
-
-```dart
-try {
-  await device.connect();
-} on RuuviConnectionException catch (e) {
-  print('Connection error: $e');
-} on RuuviException catch (e) {
-  print('General Ruuvi error: $e');
-}
-```
-
-## Example App
-
-See the [example](example/) directory for a complete Flutter app demonstrating all package features.
-
-## Limitations
-
-- Only supports Ruuvi data format 5 (RAWv2)
-- Historical data retrieval requires firmware 3.x or higher
-- BLE scanning requires location permissions on Android
-- Physical device required (BLE doesn't work on simulators)
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- **No tag found**: make sure Bluetooth is on, the permissions are granted and the tag is within range. BLE does not work on emulators: use a physical device.
+- **History is empty or incomplete**: stay close to the tag during the transfer, and check `isComplete`. Tags running a firmware without GATT support (for example the stock "longlife" build) have no history: `getHistory()` throws `RuuviConnectionException` (tag not connectable) or `RuuviDataException` (no log service).
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Additional Information
-
-- **Issues**: Report bugs and feature requests on [GitHub Issues](https://github.com/alaindeseine/ruuvi_sensor/issues)
-- **Documentation**: [API Documentation](https://pub.dev/documentation/ruuvi_sensor/latest/)
-- **RuuviTag**: Learn more about RuuviTag sensors at [ruuvi.com](https://ruuvi.com)
-- **Protocol**: Based on [Ruuvi sensor protocols](https://docs.ruuvi.com)
+MIT, see [LICENSE](LICENSE).

@@ -1,3 +1,35 @@
+## 1.1.0
+
+First release on pub.dev. The public API is backward compatible with 1.0.x.
+
+* **CHANGED**: BLE backend is now [flutter_blue_ultra](https://pub.dev/packages/flutter_blue_ultra) (BSD-3-Clause) instead of the discontinued flutter_reactive_ble
+* **CHANGED**: `permission_handler` 13. Apps must compile against Android SDK 37 (`compileSdk = 37`)
+* **CHANGED**: No location permission is requested on Android 12+ anymore
+* **NEW**: `RuuviBleScanResult` exposes every RAWv2 field: acceleration, TX power, movement counter, measurement sequence and MAC address
+* **NEW**: `RuuviBleScanResult.pressureHPa` (scan `pressure` stays in Pa, history pressure is in hPa)
+* **NEW**: `RuuviHistoryCollection.isComplete` tells whether the tag sent its whole log
+* **NEW**: optional `timeout` parameter on `getHistory()` / `getAllHistory()` (default 5 minutes)
+* **FIXED**: RAWv1 (data format 3) decoding
+* **FIXED**: a RAWv2 value reported as "not available" is now `null` instead of hiding the whole tag
+* **FIXED**: a logged temperature of -0.01 °C was mistaken for the end of the log and truncated the history
+* **FIXED**: `getDeviceInformation()` now connects to the tag before reading
+* **FIXED**: connections are always closed, including on errors; operations on the same tag run one after the other
+* **FIXED**: `filterByDateRange()` includes both bounds
+* **DEPRECATED**: `getHistoryFromEpoch()`, use `getAllHistory()` (the firmware rejects an epoch start time)
+
+## 1.0.8
+
+* **FIXED**: wait for the connection to be established before reading the history
+
+## 1.0.7
+
+* **FIXED**: crashes when reading the history several times in a row
+* **IMPROVED**: example app UI
+
+## 1.0.5
+
+* Internal timestamp tests (no functional change)
+
 ## 1.0.4+fixed-timestamp-range
 
 * **FIXED**: Use 30-day old timestamp instead of epoch 0 for complete history retrieval
