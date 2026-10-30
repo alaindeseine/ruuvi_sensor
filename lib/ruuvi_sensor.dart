@@ -1,4 +1,6 @@
-library ruuvi_sensor;
+/// Scan RuuviTag environmental sensors over Bluetooth Low Energy and
+/// download their stored measurement history.
+library;
 
 export 'src/ruuvi_ble_scanner.dart';
 export 'src/ruuvi_history_reader.dart';

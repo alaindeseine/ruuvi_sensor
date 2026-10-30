@@ -1,9 +1,9 @@
 /// A single measurement from RuuviTag history
 class RuuviHistoryMeasurement {
   final DateTime timestamp;
-  final double? temperature;  // °C
-  final double? humidity;     // %
-  final double? pressure;     // hPa
+  final double? temperature; // °C
+  final double? humidity; // %
+  final double? pressure; // hPa
 
   const RuuviHistoryMeasurement({
     required this.timestamp,
@@ -125,10 +125,12 @@ class RuuviHistoryCollection {
   bool get isNotEmpty => measurements.isNotEmpty;
 
   /// Returns the first measurement (oldest)
-  RuuviHistoryMeasurement? get first => measurements.isNotEmpty ? measurements.first : null;
+  RuuviHistoryMeasurement? get first =>
+      measurements.isNotEmpty ? measurements.first : null;
 
   /// Returns the last measurement (newest)
-  RuuviHistoryMeasurement? get last => measurements.isNotEmpty ? measurements.last : null;
+  RuuviHistoryMeasurement? get last =>
+      measurements.isNotEmpty ? measurements.last : null;
 
   /// Returns the time range covered by this collection
   Duration? get timeRange {
@@ -138,8 +140,9 @@ class RuuviHistoryCollection {
 
   /// Returns measurements filtered by date range
   RuuviHistoryCollection filterByDateRange(DateTime start, DateTime end) {
-    final filtered = measurements.where((m) =>
-        m.timestamp.isAfter(start) && m.timestamp.isBefore(end)).toList();
+    final filtered = measurements
+        .where((m) => m.timestamp.isAfter(start) && m.timestamp.isBefore(end))
+        .toList();
     return RuuviHistoryCollection(measurements: filtered, deviceId: deviceId);
   }
 
@@ -151,16 +154,30 @@ class RuuviHistoryCollection {
 
   /// Returns average values for the collection
   Map<String, double?> getAverages() {
-    if (measurements.isEmpty) return {'temperature': null, 'humidity': null, 'pressure': null};
+    if (measurements.isEmpty) {
+      return {'temperature': null, 'humidity': null, 'pressure': null};
+    }
 
-    final temps = measurements.where((m) => m.temperature != null).map((m) => m.temperature!);
-    final hums = measurements.where((m) => m.humidity != null).map((m) => m.humidity!);
-    final pres = measurements.where((m) => m.pressure != null).map((m) => m.pressure!);
+    final temps = measurements
+        .where((m) => m.temperature != null)
+        .map((m) => m.temperature!);
+    final hums = measurements
+        .where((m) => m.humidity != null)
+        .map((m) => m.humidity!);
+    final pres = measurements
+        .where((m) => m.pressure != null)
+        .map((m) => m.pressure!);
 
     return {
-      'temperature': temps.isNotEmpty ? temps.reduce((a, b) => a + b) / temps.length : null,
-      'humidity': hums.isNotEmpty ? hums.reduce((a, b) => a + b) / hums.length : null,
-      'pressure': pres.isNotEmpty ? pres.reduce((a, b) => a + b) / pres.length : null,
+      'temperature': temps.isNotEmpty
+          ? temps.reduce((a, b) => a + b) / temps.length
+          : null,
+      'humidity': hums.isNotEmpty
+          ? hums.reduce((a, b) => a + b) / hums.length
+          : null,
+      'pressure': pres.isNotEmpty
+          ? pres.reduce((a, b) => a + b) / pres.length
+          : null,
     };
   }
 
@@ -173,13 +190,19 @@ class RuuviHistoryCollection {
       buffer.writeln('  Time range: ${first!.timestamp} to ${last!.timestamp}');
       final averages = getAverages();
       if (averages['temperature'] != null) {
-        buffer.writeln('  Avg temperature: ${averages['temperature']!.toStringAsFixed(2)}°C');
+        buffer.writeln(
+          '  Avg temperature: ${averages['temperature']!.toStringAsFixed(2)}°C',
+        );
       }
       if (averages['humidity'] != null) {
-        buffer.writeln('  Avg humidity: ${averages['humidity']!.toStringAsFixed(1)}%');
+        buffer.writeln(
+          '  Avg humidity: ${averages['humidity']!.toStringAsFixed(1)}%',
+        );
       }
       if (averages['pressure'] != null) {
-        buffer.writeln('  Avg pressure: ${averages['pressure']!.toStringAsFixed(1)} hPa');
+        buffer.writeln(
+          '  Avg pressure: ${averages['pressure']!.toStringAsFixed(1)} hPa',
+        );
       }
     }
     return buffer.toString();

@@ -10,9 +10,15 @@ class RuuviHistoryReader {
   final FlutterReactiveBle _ble = FlutterReactiveBle();
 
   // Nordic UART Service UUIDs
-  static final Uuid _nusServiceUuid = Uuid.parse('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
-  static final Uuid _rxCharacteristicUuid = Uuid.parse('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
-  static final Uuid _txCharacteristicUuid = Uuid.parse('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
+  static final Uuid _nusServiceUuid = Uuid.parse(
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+  );
+  static final Uuid _rxCharacteristicUuid = Uuid.parse(
+    '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+  );
+  static final Uuid _txCharacteristicUuid = Uuid.parse(
+    '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+  );
 
   // Track active connections and subscriptions to prevent crashes
   final Map<String, StreamSubscription> _activeSubscriptions = {};
@@ -46,8 +52,9 @@ class RuuviHistoryReader {
         final services = await _ble.getDiscoveredServices(deviceId);
 
         // Find Device Information Service
-        final deviceInfoService = services.where((s) =>
-            s.id.toString().toLowerCase().contains('180a')).firstOrNull;
+        final deviceInfoService = services
+            .where((s) => s.id.toString().toLowerCase().contains('180a'))
+            .firstOrNull;
 
         if (deviceInfoService != null) {
           // Read all available characteristics
@@ -95,7 +102,6 @@ class RuuviHistoryReader {
         firmwareVersion: firmwareVersion,
         hardwareVersion: hardwareVersion,
       );
-
     } catch (e) {
       throw RuuviConnectionException('Failed to read device information: $e');
     }
@@ -136,11 +142,13 @@ class RuuviHistoryReader {
 
       _activeConnections[deviceId] = connectionStream.listen(
         (connectionState) {
-          if (connectionState.connectionState == DeviceConnectionState.connected) {
+          if (connectionState.connectionState ==
+              DeviceConnectionState.connected) {
             if (!connectionCompleter.isCompleted) {
               connectionCompleter.complete(true);
             }
-          } else if (connectionState.connectionState == DeviceConnectionState.disconnected) {
+          } else if (connectionState.connectionState ==
+              DeviceConnectionState.disconnected) {
             if (!connectionCompleter.isCompleted) {
               connectionCompleter.complete(false);
             }
@@ -175,15 +183,25 @@ class RuuviHistoryReader {
       // CORRECTION : Si startDate est null, utiliser un timestamp très ancien (30 jours)
       // pour récupérer TOUT l'historique disponible. startTime = 0 (epoch 1970) semble invalide.
       final startTime = startDate == null
-        ? (DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch / 1000).round()
-        : (start.millisecondsSinceEpoch / 1000).round();
+          ? (DateTime.now()
+                        .subtract(const Duration(days: 30))
+                        .millisecondsSinceEpoch /
+                    1000)
+                .round()
+          : (start.millisecondsSinceEpoch / 1000).round();
 
       final command = [
-        0x3A, 0x3A, 0x11,
-        (currentTime >> 24) & 0xFF, (currentTime >> 16) & 0xFF, 
-        (currentTime >> 8) & 0xFF, currentTime & 0xFF,
-        (startTime >> 24) & 0xFF, (startTime >> 16) & 0xFF, 
-        (startTime >> 8) & 0xFF, startTime & 0xFF,
+        0x3A,
+        0x3A,
+        0x11,
+        (currentTime >> 24) & 0xFF,
+        (currentTime >> 16) & 0xFF,
+        (currentTime >> 8) & 0xFF,
+        currentTime & 0xFF,
+        (startTime >> 24) & 0xFF,
+        (startTime >> 16) & 0xFF,
+        (startTime >> 8) & 0xFF,
+        startTime & 0xFF,
       ];
 
       // Setup completion detection
@@ -221,38 +239,42 @@ class RuuviHistoryReader {
         deviceId: deviceId,
       );
 
-      final subscription = _ble.subscribeToCharacteristic(characteristic).listen(
-        (data) {
-          lastDataReceived = DateTime.now();
+      final subscription = _ble
+          .subscribeToCharacteristic(characteristic)
+          .listen(
+            (data) {
+              lastDataReceived = DateTime.now();
 
-          // Parse Ruuvi Log Response (11 bytes)
-          if (data.length == 11) {
-            final parsedData = _parseRuuviLogResponse(Uint8List.fromList(data));
-            if (parsedData != null) {
-              if (parsedData['isEndMarker'] == true) {
-                // End of history detected
-                if (!completer.isCompleted) {
-                  completer.complete();
+              // Parse Ruuvi Log Response (11 bytes)
+              if (data.length == 11) {
+                final parsedData = _parseRuuviLogResponse(
+                  Uint8List.fromList(data),
+                );
+                if (parsedData != null) {
+                  if (parsedData['isEndMarker'] == true) {
+                    // End of history detected
+                    if (!completer.isCompleted) {
+                      completer.complete();
+                    }
+                    return;
+                  }
+
+                  // Group measurements by timestamp
+                  final timestamp = parsedData['timestamp'] as int;
+                  final sensorType = parsedData['sensorType'] as String;
+                  final value = parsedData['value'] as double;
+
+                  measurementGroups[timestamp] ??= {};
+                  measurementGroups[timestamp]![sensorType] = value;
                 }
-                return;
               }
-
-              // Group measurements by timestamp
-              final timestamp = parsedData['timestamp'] as int;
-              final sensorType = parsedData['sensorType'] as String;
-              final value = parsedData['value'] as double;
-
-              measurementGroups[timestamp] ??= {};
-              measurementGroups[timestamp]![sensorType] = value;
-            }
-          }
-        },
-        onError: (error) {
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-        },
-      );
+            },
+            onError: (error) {
+              if (!completer.isCompleted) {
+                completer.complete();
+              }
+            },
+          );
 
       // Track subscription
       _activeSubscriptions[deviceId] = subscription;
@@ -264,7 +286,10 @@ class RuuviHistoryReader {
         deviceId: deviceId,
       );
 
-      await _ble.writeCharacteristicWithoutResponse(txCharacteristic, value: command);
+      await _ble.writeCharacteristicWithoutResponse(
+        txCharacteristic,
+        value: command,
+      );
 
       // Wait for completion
       await completer.future;
@@ -282,12 +307,14 @@ class RuuviHistoryReader {
         final timestamp = DateTime.fromMillisecondsSinceEpoch(entry.key * 1000);
         final values = entry.value;
 
-        measurements.add(RuuviHistoryMeasurement(
-          timestamp: timestamp,
-          temperature: values['temperature'],
-          humidity: values['humidity'],
-          pressure: values['pressure'],
-        ));
+        measurements.add(
+          RuuviHistoryMeasurement(
+            timestamp: timestamp,
+            temperature: values['temperature'],
+            humidity: values['humidity'],
+            pressure: values['pressure'],
+          ),
+        );
       }
 
       // Sort by timestamp
@@ -297,7 +324,6 @@ class RuuviHistoryReader {
         measurements: measurements,
         deviceId: deviceId,
       );
-
     } catch (e) {
       throw RuuviConnectionException('Failed to read history: $e');
     }
@@ -350,11 +376,17 @@ class RuuviHistoryReader {
       final startTime = 0; // Force epoch
 
       final command = [
-        0x3A, 0x3A, 0x11,
-        (currentTime >> 24) & 0xFF, (currentTime >> 16) & 0xFF,
-        (currentTime >> 8) & 0xFF, currentTime & 0xFF,
-        (startTime >> 24) & 0xFF, (startTime >> 16) & 0xFF,
-        (startTime >> 8) & 0xFF, startTime & 0xFF,
+        0x3A,
+        0x3A,
+        0x11,
+        (currentTime >> 24) & 0xFF,
+        (currentTime >> 16) & 0xFF,
+        (currentTime >> 8) & 0xFF,
+        currentTime & 0xFF,
+        (startTime >> 24) & 0xFF,
+        (startTime >> 16) & 0xFF,
+        (startTime >> 8) & 0xFF,
+        startTime & 0xFF,
       ];
 
       // Setup completion detection
@@ -392,38 +424,42 @@ class RuuviHistoryReader {
         deviceId: deviceId,
       );
 
-      final subscription = _ble.subscribeToCharacteristic(characteristic).listen(
-        (data) {
-          lastDataReceived = DateTime.now();
+      final subscription = _ble
+          .subscribeToCharacteristic(characteristic)
+          .listen(
+            (data) {
+              lastDataReceived = DateTime.now();
 
-          // Parse Ruuvi Log Response (11 bytes)
-          if (data.length == 11) {
-            final parsedData = _parseRuuviLogResponse(Uint8List.fromList(data));
-            if (parsedData != null) {
-              if (parsedData['isEndMarker'] == true) {
-                // End of history detected
-                if (!completer.isCompleted) {
-                  completer.complete();
+              // Parse Ruuvi Log Response (11 bytes)
+              if (data.length == 11) {
+                final parsedData = _parseRuuviLogResponse(
+                  Uint8List.fromList(data),
+                );
+                if (parsedData != null) {
+                  if (parsedData['isEndMarker'] == true) {
+                    // End of history detected
+                    if (!completer.isCompleted) {
+                      completer.complete();
+                    }
+                    return;
+                  }
+
+                  // Group measurements by timestamp
+                  final timestamp = parsedData['timestamp'] as int;
+                  final sensorType = parsedData['sensorType'] as String;
+                  final value = parsedData['value'] as double;
+
+                  measurementGroups[timestamp] ??= {};
+                  measurementGroups[timestamp]![sensorType] = value;
                 }
-                return;
               }
-
-              // Group measurements by timestamp
-              final timestamp = parsedData['timestamp'] as int;
-              final sensorType = parsedData['sensorType'] as String;
-              final value = parsedData['value'] as double;
-
-              measurementGroups[timestamp] ??= {};
-              measurementGroups[timestamp]![sensorType] = value;
-            }
-          }
-        },
-        onError: (error) {
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-        },
-      );
+            },
+            onError: (error) {
+              if (!completer.isCompleted) {
+                completer.complete();
+              }
+            },
+          );
 
       // Send history command
       final txCharacteristic = QualifiedCharacteristic(
@@ -432,7 +468,10 @@ class RuuviHistoryReader {
         deviceId: deviceId,
       );
 
-      await _ble.writeCharacteristicWithoutResponse(txCharacteristic, value: command);
+      await _ble.writeCharacteristicWithoutResponse(
+        txCharacteristic,
+        value: command,
+      );
 
       // Wait for completion
       await completer.future;
@@ -447,12 +486,14 @@ class RuuviHistoryReader {
         final timestamp = DateTime.fromMillisecondsSinceEpoch(entry.key * 1000);
         final values = entry.value;
 
-        measurements.add(RuuviHistoryMeasurement(
-          timestamp: timestamp,
-          temperature: values['temperature'],
-          humidity: values['humidity'],
-          pressure: values['pressure'],
-        ));
+        measurements.add(
+          RuuviHistoryMeasurement(
+            timestamp: timestamp,
+            temperature: values['temperature'],
+            humidity: values['humidity'],
+            pressure: values['pressure'],
+          ),
+        );
       }
 
       // Sort by timestamp
@@ -462,7 +503,6 @@ class RuuviHistoryReader {
         measurements: measurements,
         deviceId: deviceId,
       );
-
     } catch (e) {
       throw RuuviConnectionException('Failed to read history from epoch: $e');
     }
@@ -479,10 +519,12 @@ class RuuviHistoryReader {
       if (type != 0x10) return null; // Not a log write response
 
       // Parse timestamp (4 bytes, big-endian)
-      final timestamp = (data[3] << 24) | (data[4] << 16) | (data[5] << 8) | data[6];
+      final timestamp =
+          (data[3] << 24) | (data[4] << 16) | (data[5] << 8) | data[6];
 
       // Parse value (4 bytes, big-endian, signed)
-      final rawValue = (data[7] << 24) | (data[8] << 16) | (data[9] << 8) | data[10];
+      final rawValue =
+          (data[7] << 24) | (data[8] << 16) | (data[9] << 8) | data[10];
       final value = rawValue > 0x7FFFFFFF ? rawValue - 0x100000000 : rawValue;
 
       // Check for end marker
@@ -517,7 +559,6 @@ class RuuviHistoryReader {
         'value': convertedValue,
         'isEndMarker': false,
       };
-
     } catch (e) {
       return null;
     }
@@ -544,7 +585,10 @@ class RuuviHistoryReader {
 
   /// Disposes all active connections and subscriptions
   Future<void> dispose() async {
-    final deviceIds = [..._activeSubscriptions.keys, ..._activeConnections.keys];
+    final deviceIds = [
+      ..._activeSubscriptions.keys,
+      ..._activeConnections.keys,
+    ];
     for (final deviceId in deviceIds) {
       await _cleanupDevice(deviceId);
     }

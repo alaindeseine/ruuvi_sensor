@@ -14,12 +14,12 @@ class RuuviTagInformation {
     String? model,
     String? firmwareVersion,
     String? hardwareVersion,
-  })  : _identifier = identifier,
-        _macAddress = macAddress,
-        _manufacturer = manufacturer,
-        _model = model,
-        _firmwareVersion = firmwareVersion,
-        _hardwareVersion = hardwareVersion;
+  }) : _identifier = identifier,
+       _macAddress = macAddress,
+       _manufacturer = manufacturer,
+       _model = model,
+       _firmwareVersion = firmwareVersion,
+       _hardwareVersion = hardwareVersion;
 
   /// Returns the unique identifier of the RuuviTag
   /// This is either the serial number (if available) or the MAC address as fallback
@@ -53,8 +53,9 @@ class RuuviTagInformation {
   /// Returns true if the identifier is a serial number (not a MAC address)
   bool hasSerialNumber() {
     // MAC address format: XX:XX:XX:XX:XX:XX
-    return !RegExp(r'^[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$')
-        .hasMatch(_identifier);
+    return !RegExp(
+      r'^[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$',
+    ).hasMatch(_identifier);
   }
 
   /// Returns a summary of all available information
@@ -80,8 +81,12 @@ class RuuviTagInformation {
     buffer.writeln('  Display Name: ${getDisplayName()}');
     if (_manufacturer != null) buffer.writeln('  Manufacturer: $_manufacturer');
     if (_model != null) buffer.writeln('  Model: $_model');
-    if (_firmwareVersion != null) buffer.writeln('  Firmware: $_firmwareVersion');
-    if (_hardwareVersion != null) buffer.writeln('  Hardware: $_hardwareVersion');
+    if (_firmwareVersion != null) {
+      buffer.writeln('  Firmware: $_firmwareVersion');
+    }
+    if (_hardwareVersion != null) {
+      buffer.writeln('  Hardware: $_hardwareVersion');
+    }
     buffer.writeln('  Has Serial Number: ${hasSerialNumber()}');
     return buffer.toString();
   }
