@@ -1,596 +1,279 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
-import 'models/ruuvi_tag_information.dart';
-import 'models/ruuvi_history_measurement.dart';
+
+import 'package:flutter_blue_ultra/flutter_blue_ultra.dart';
+
 import 'exceptions/ruuvi_exceptions.dart';
+import 'models/ruuvi_history_measurement.dart';
+import 'models/ruuvi_tag_information.dart';
+import 'ruuvi_log_parser.dart';
+import 'ruuvi_permissions.dart';
 
-/// Reader for RuuviTag historical data using flutter_reactive_ble
+/// Reads device information and logged history from a RuuviTag over GATT.
+///
+/// Only one operation runs at a time per tag: a call made while another one
+/// is in progress on the same tag waits for it to finish.
 class RuuviHistoryReader {
-  final FlutterReactiveBle _ble = FlutterReactiveBle();
-
-  // Nordic UART Service UUIDs
-  static final Uuid _nusServiceUuid = Uuid.parse(
+  // Nordic UART Service. Characteristic names follow the tag's point of view:
+  // we write commands to RX and receive log packets as TX notifications.
+  static final Guid _nusServiceUuid = Guid(
     '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
   );
-  static final Uuid _rxCharacteristicUuid = Uuid.parse(
+  static final Guid _rxCharacteristicUuid = Guid(
     '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
   );
-  static final Uuid _txCharacteristicUuid = Uuid.parse(
+  static final Guid _txCharacteristicUuid = Guid(
     '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
   );
+  static final Guid _deviceInfoServiceUuid = Guid('180a');
 
-  // Track active connections and subscriptions to prevent crashes
-  final Map<String, StreamSubscription> _activeSubscriptions = {};
-  final Map<String, StreamSubscription> _activeConnections = {};
+  static const Duration _connectionTimeout = Duration(seconds: 15);
 
-  // Device Information Service UUIDs (for reference)
-  // static final Uuid _deviceInfoServiceUuid = Uuid.parse('0000180a-0000-1000-8000-00805f9b34fb');
+  /// A transfer is considered over when no packet arrived for this long.
+  static const Duration _silenceTimeout = Duration(seconds: 10);
+
+  /// Firmware rejects a start time of 0 (epoch), so "all history" means
+  /// this far back.
+  static const Duration _allHistoryRange = Duration(days: 30);
+
+  final Map<String, Future<void>> _pending = {};
+  final Set<String> _connected = {};
 
   /// Reads device information from a RuuviTag
   ///
-  /// Returns [RuuviTagInformation] with device details
+  /// Returns [RuuviTagInformation] with device details. Fields the tag
+  /// doesn't expose are `null`; the identifier falls back to [deviceId].
   /// Throws [RuuviConnectionException] if connection fails
-  /// Throws [RuuviDataException] if data reading fails
-  Future<RuuviTagInformation> getDeviceInformation(String deviceId) async {
-    try {
-      // Connect to device
-      _ble.connectToDevice(
-        id: deviceId,
-        connectionTimeout: const Duration(seconds: 10),
-      );
-
-      String? serialNumber;
-      String? manufacturer;
-      String? model;
-      String? firmwareVersion;
-      String? hardwareVersion;
-
+  Future<RuuviTagInformation> getDeviceInformation(String deviceId) {
+    return _exclusive(deviceId, () async {
+      final device = await _connect(deviceId);
       try {
-        // Discover services
-        await _ble.discoverAllServices(deviceId);
-        final services = await _ble.getDiscoveredServices(deviceId);
-
-        // Find Device Information Service
-        final deviceInfoService = services
-            .where((s) => s.id.toString().toLowerCase().contains('180a'))
+        final services = await device.discoverServices();
+        final info = services
+            .where((s) => s.uuid == _deviceInfoServiceUuid)
             .firstOrNull;
 
-        if (deviceInfoService != null) {
-          // Read all available characteristics
-          for (final char in deviceInfoService.characteristics) {
-            try {
-              final data = await _ble.readCharacteristic(
-                QualifiedCharacteristic(
-                  serviceId: deviceInfoService.id,
-                  characteristicId: char.id,
-                  deviceId: deviceId,
-                ),
-              );
-              final value = String.fromCharCodes(data);
-              final charId = char.id.toString().toLowerCase();
-
-              if (charId.contains('2a25')) {
-                serialNumber = value;
-              } else if (charId.contains('2a29')) {
-                manufacturer = value;
-              } else if (charId.contains('2a24')) {
-                model = value;
-              } else if (charId.contains('2a26')) {
-                firmwareVersion = value;
-              } else if (charId.contains('2a27')) {
-                hardwareVersion = value;
-              }
-            } catch (e) {
-              // Ignore individual characteristic read errors
-              continue;
-            }
+        final values = <String, String>{};
+        for (final c in info?.characteristics ?? <BluetoothCharacteristic>[]) {
+          try {
+            values[c.uuid.str.toLowerCase()] = String.fromCharCodes(
+              await c.read(),
+            ).trim();
+          } catch (_) {
+            // Unreadable characteristic: leave the field empty.
           }
         }
+
+        return RuuviTagInformation(
+          identifier: values['2a25'] ?? deviceId,
+          macAddress: deviceId,
+          manufacturer: values['2a29'],
+          model: values['2a24'],
+          firmwareVersion: values['2a26'],
+          hardwareVersion: values['2a27'],
+        );
+      } on RuuviException {
+        rethrow;
       } catch (e) {
-        // Service discovery failed, but we can still return basic info
+        throw RuuviConnectionException('Failed to read device information: $e');
+      } finally {
+        await _disconnect(device);
       }
-
-      // Use serial number if available, otherwise fallback to MAC address
-      final identifier = serialNumber ?? deviceId;
-
-      return RuuviTagInformation(
-        identifier: identifier,
-        macAddress: deviceId,
-        manufacturer: manufacturer,
-        model: model,
-        firmwareVersion: firmwareVersion,
-        hardwareVersion: hardwareVersion,
-      );
-    } catch (e) {
-      throw RuuviConnectionException('Failed to read device information: $e');
-    }
+    });
   }
 
   /// Reads historical data from a RuuviTag
   ///
   /// [deviceId] MAC address of the RuuviTag
-  /// [startDate] optional start date (defaults to 7 days ago, null = ALL history)
+  /// [startDate] only values logged after this date. When `null`, reads the
+  /// last 30 days, i.e. everything a tag normally keeps (the firmware rejects
+  /// an epoch start).
   /// [endDate] optional end date (defaults to now)
+  /// [timeout] upper bound for the whole transfer.
   ///
-  /// **IMPORTANT:** If [startDate] is null, retrieves ALL available history from the RuuviTag
-  /// by using a timestamp from 30 days ago. Otherwise, only retrieves data since [startDate]
-  /// (may skip previously read data).
+  /// Returns [RuuviHistoryCollection] sorted oldest first. Check
+  /// [RuuviHistoryCollection.isComplete]: when the transfer stops early, the
+  /// values received so far are returned with `isComplete == false`.
   ///
-  /// Returns [RuuviHistoryCollection] with historical measurements
-  /// Throws [RuuviConnectionException] if connection fails
-  /// Throws [RuuviDataException] if data reading fails
+  /// Throws [RuuviConnectionException] if the tag can't be reached or the
+  /// connection fails before the transfer starts.
+  /// Throws [RuuviDataException] if the tag doesn't expose the log service
+  /// (firmware without GATT logging).
   Future<RuuviHistoryCollection> getHistory(
     String deviceId, {
     DateTime? startDate,
     DateTime? endDate,
-  }) async {
-    final measurements = <RuuviHistoryMeasurement>[];
-
-    try {
-      // Clean up any existing connections for this device
-      await _cleanupDevice(deviceId);
-
-      // Connect to device and wait for connected state
-      final connectionStream = _ble.connectToDevice(
-        id: deviceId,
-        connectionTimeout: const Duration(seconds: 10),
-      );
-
-      // Wait for connection to be established
-      final connectionCompleter = Completer<bool>();
-
-      _activeConnections[deviceId] = connectionStream.listen(
-        (connectionState) {
-          if (connectionState.connectionState ==
-              DeviceConnectionState.connected) {
-            if (!connectionCompleter.isCompleted) {
-              connectionCompleter.complete(true);
-            }
-          } else if (connectionState.connectionState ==
-              DeviceConnectionState.disconnected) {
-            if (!connectionCompleter.isCompleted) {
-              connectionCompleter.complete(false);
-            }
-          }
-        },
-        onError: (error) {
-          if (!connectionCompleter.isCompleted) {
-            connectionCompleter.complete(false);
-          }
-        },
-      );
-
-      // Wait for connection with timeout
-      final isConnected = await connectionCompleter.future.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => false,
-      );
-
-      if (!isConnected) {
-        await _cleanupDevice(deviceId);
-        throw RuuviConnectionException('Failed to connect to device $deviceId');
-      }
-
-      // Prepare time range
+    Duration timeout = const Duration(minutes: 5),
+  }) {
+    return _exclusive(deviceId, () async {
       final now = DateTime.now();
       final end = endDate ?? now;
-      final start = startDate ?? now.subtract(const Duration(days: 7));
+      final start = startDate ?? now.subtract(_allHistoryRange);
 
-      // Prepare history command
-      final currentTime = (end.millisecondsSinceEpoch / 1000).round();
-
-      // CORRECTION : Si startDate est null, utiliser un timestamp très ancien (30 jours)
-      // pour récupérer TOUT l'historique disponible. startTime = 0 (epoch 1970) semble invalide.
-      final startTime = startDate == null
-          ? (DateTime.now()
-                        .subtract(const Duration(days: 30))
-                        .millisecondsSinceEpoch /
-                    1000)
-                .round()
-          : (start.millisecondsSinceEpoch / 1000).round();
-
-      final command = [
-        0x3A,
-        0x3A,
-        0x11,
-        (currentTime >> 24) & 0xFF,
-        (currentTime >> 16) & 0xFF,
-        (currentTime >> 8) & 0xFF,
-        currentTime & 0xFF,
-        (startTime >> 24) & 0xFF,
-        (startTime >> 16) & 0xFF,
-        (startTime >> 8) & 0xFF,
-        startTime & 0xFF,
-      ];
-
-      // Setup completion detection
-      final completer = Completer<void>();
-      DateTime lastDataReceived = DateTime.now();
-
-      // Temporary storage for grouping measurements by timestamp
-      final Map<int, Map<String, double>> measurementGroups = {};
-
-      // Timer for silence detection
+      final device = await _connect(deviceId);
+      StreamSubscription<List<int>>? valueSubscription;
+      StreamSubscription<BluetoothConnectionState>? stateSubscription;
       Timer? silenceTimer;
-      silenceTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-        final silenceDuration = DateTime.now().difference(lastDataReceived);
-        if (silenceDuration.inSeconds > 10) {
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-          timer.cancel();
-        }
-      });
-
-      // Global timeout timer
-      Timer? globalTimer;
-      globalTimer = Timer(const Duration(seconds: 120), () {
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-        silenceTimer?.cancel();
-      });
-
-      // Subscribe to notifications
-      final characteristic = QualifiedCharacteristic(
-        serviceId: _nusServiceUuid,
-        characteristicId: _txCharacteristicUuid,
-        deviceId: deviceId,
-      );
-
-      final subscription = _ble
-          .subscribeToCharacteristic(characteristic)
-          .listen(
-            (data) {
-              lastDataReceived = DateTime.now();
-
-              // Parse Ruuvi Log Response (11 bytes)
-              if (data.length == 11) {
-                final parsedData = _parseRuuviLogResponse(
-                  Uint8List.fromList(data),
-                );
-                if (parsedData != null) {
-                  if (parsedData['isEndMarker'] == true) {
-                    // End of history detected
-                    if (!completer.isCompleted) {
-                      completer.complete();
-                    }
-                    return;
-                  }
-
-                  // Group measurements by timestamp
-                  final timestamp = parsedData['timestamp'] as int;
-                  final sensorType = parsedData['sensorType'] as String;
-                  final value = parsedData['value'] as double;
-
-                  measurementGroups[timestamp] ??= {};
-                  measurementGroups[timestamp]![sensorType] = value;
-                }
-              }
-            },
-            onError: (error) {
-              if (!completer.isCompleted) {
-                completer.complete();
-              }
-            },
+      try {
+        final services = await device.discoverServices();
+        final nus = services
+            .where((s) => s.uuid == _nusServiceUuid)
+            .firstOrNull;
+        final rx = nus?.characteristics
+            .where((c) => c.uuid == _rxCharacteristicUuid)
+            .firstOrNull;
+        final tx = nus?.characteristics
+            .where((c) => c.uuid == _txCharacteristicUuid)
+            .firstOrNull;
+        if (rx == null || tx == null) {
+          throw const RuuviDataException(
+            'Log service not found: the tag firmware does not support history',
           );
+        }
 
-      // Track subscription
-      _activeSubscriptions[deviceId] = subscription;
+        final groups = <int, Map<String, double>>{};
+        final done = Completer<bool>(); // true = end-of-log received
 
-      // Send history command
-      final txCharacteristic = QualifiedCharacteristic(
-        serviceId: _nusServiceUuid,
-        characteristicId: _rxCharacteristicUuid,
-        deviceId: deviceId,
-      );
+        void finish(bool complete) {
+          if (!done.isCompleted) done.complete(complete);
+        }
 
-      await _ble.writeCharacteristicWithoutResponse(
-        txCharacteristic,
-        value: command,
-      );
+        void armSilenceTimer() {
+          silenceTimer?.cancel();
+          silenceTimer = Timer(_silenceTimeout, () => finish(false));
+        }
 
-      // Wait for completion
-      await completer.future;
+        valueSubscription = tx.onValueReceived.listen((data) {
+          armSilenceTimer();
+          switch (parseRuuviLogPacket(data)) {
+            case RuuviLogValue(
+              :final timestamp,
+              :final sensorType,
+              :final value,
+            ):
+              (groups[timestamp] ??= {})[sensorType] = value;
+            case RuuviLogEnd():
+              finish(true);
+            case RuuviLogAborted():
+              finish(false);
+            case null:
+              break;
+          }
+        }, onError: (Object _) => finish(false));
 
-      // Clean up timers and subscription
-      silenceTimer.cancel();
-      globalTimer.cancel();
-      await subscription.cancel();
+        stateSubscription = device.connectionState.listen((state) {
+          if (state == BluetoothConnectionState.disconnected) finish(false);
+        });
 
-      // Clean up tracked connections
-      await _cleanupDevice(deviceId);
-
-      // Convert grouped measurements to RuuviHistoryMeasurement objects
-      for (final entry in measurementGroups.entries) {
-        final timestamp = DateTime.fromMillisecondsSinceEpoch(entry.key * 1000);
-        final values = entry.value;
-
-        measurements.add(
-          RuuviHistoryMeasurement(
-            timestamp: timestamp,
-            temperature: values['temperature'],
-            humidity: values['humidity'],
-            pressure: values['pressure'],
-          ),
+        await tx.setNotifyValue(true);
+        armSilenceTimer();
+        await rx.write(
+          _buildLogReadCommand(end, start),
+          withoutResponse: rx.properties.writeWithoutResponse,
         );
+
+        final complete = await done.future.timeout(
+          timeout,
+          onTimeout: () => false,
+        );
+
+        final measurements = [
+          for (final entry in groups.entries)
+            RuuviHistoryMeasurement(
+              timestamp: DateTime.fromMillisecondsSinceEpoch(entry.key * 1000),
+              temperature: entry.value['temperature'],
+              humidity: entry.value['humidity'],
+              pressure: entry.value['pressure'],
+            ),
+        ]..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+        return RuuviHistoryCollection(
+          measurements: measurements,
+          deviceId: deviceId,
+          isComplete: complete,
+        );
+      } on RuuviException {
+        rethrow;
+      } catch (e) {
+        throw RuuviConnectionException('Failed to read history: $e');
+      } finally {
+        silenceTimer?.cancel();
+        await valueSubscription?.cancel();
+        await stateSubscription?.cancel();
+        await _disconnect(device);
       }
-
-      // Sort by timestamp
-      measurements.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-      return RuuviHistoryCollection(
-        measurements: measurements,
-        deviceId: deviceId,
-      );
-    } catch (e) {
-      throw RuuviConnectionException('Failed to read history: $e');
-    }
+    });
   }
 
   /// Reads ALL available historical data from a RuuviTag
   ///
-  /// This is a convenience method that calls getHistory() with startDate = null
-  /// to ensure ALL available data is retrieved from the RuuviTag's memory.
-  ///
-  /// [deviceId] MAC address of the RuuviTag
-  /// [endDate] optional end date (defaults to now)
-  ///
-  /// Returns [RuuviHistoryCollection] with ALL historical measurements
+  /// Same as [getHistory] with `startDate: null`.
   Future<RuuviHistoryCollection> getAllHistory(
     String deviceId, {
     DateTime? endDate,
-  }) async {
-    return getHistory(deviceId, startDate: null, endDate: endDate);
+    Duration timeout = const Duration(minutes: 5),
+  }) {
+    return getHistory(deviceId, endDate: endDate, timeout: timeout);
   }
 
-  /// TEST: Reads history with startTime = 0 (epoch)
-  ///
-  /// This method forces startTime = 0 to test if the RuuviTag responds
-  /// to epoch timestamp requests.
-  ///
-  /// [deviceId] MAC address of the RuuviTag
-  /// [endDate] optional end date (defaults to now)
-  ///
-  /// Returns [RuuviHistoryCollection] with historical measurements
+  /// Former test method; the firmware rejects an epoch start time.
+  @Deprecated('Use getAllHistory() instead. Will be removed in 2.0.0.')
   Future<RuuviHistoryCollection> getHistoryFromEpoch(
     String deviceId, {
     DateTime? endDate,
-  }) async {
-    final measurements = <RuuviHistoryMeasurement>[];
-
-    try {
-      // Connect to device
-      _ble.connectToDevice(
-        id: deviceId,
-        connectionTimeout: const Duration(seconds: 10),
-      );
-
-      // Prepare time range
-      final now = DateTime.now();
-      final end = endDate ?? now;
-
-      // Prepare history command with startTime = 0 (epoch)
-      final currentTime = (end.millisecondsSinceEpoch / 1000).round();
-      final startTime = 0; // Force epoch
-
-      final command = [
-        0x3A,
-        0x3A,
-        0x11,
-        (currentTime >> 24) & 0xFF,
-        (currentTime >> 16) & 0xFF,
-        (currentTime >> 8) & 0xFF,
-        currentTime & 0xFF,
-        (startTime >> 24) & 0xFF,
-        (startTime >> 16) & 0xFF,
-        (startTime >> 8) & 0xFF,
-        startTime & 0xFF,
-      ];
-
-      // Setup completion detection
-      final completer = Completer<void>();
-      DateTime lastDataReceived = DateTime.now();
-
-      // Temporary storage for grouping measurements by timestamp
-      final Map<int, Map<String, double>> measurementGroups = {};
-
-      // Timer for silence detection
-      Timer silenceTimer;
-      silenceTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-        final silenceDuration = DateTime.now().difference(lastDataReceived);
-        if (silenceDuration.inSeconds > 10) {
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-          timer.cancel();
-        }
-      });
-
-      // Global timeout timer
-      Timer globalTimer;
-      globalTimer = Timer(const Duration(seconds: 120), () {
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-        silenceTimer.cancel();
-      });
-
-      // Subscribe to notifications
-      final characteristic = QualifiedCharacteristic(
-        serviceId: _nusServiceUuid,
-        characteristicId: _txCharacteristicUuid,
-        deviceId: deviceId,
-      );
-
-      final subscription = _ble
-          .subscribeToCharacteristic(characteristic)
-          .listen(
-            (data) {
-              lastDataReceived = DateTime.now();
-
-              // Parse Ruuvi Log Response (11 bytes)
-              if (data.length == 11) {
-                final parsedData = _parseRuuviLogResponse(
-                  Uint8List.fromList(data),
-                );
-                if (parsedData != null) {
-                  if (parsedData['isEndMarker'] == true) {
-                    // End of history detected
-                    if (!completer.isCompleted) {
-                      completer.complete();
-                    }
-                    return;
-                  }
-
-                  // Group measurements by timestamp
-                  final timestamp = parsedData['timestamp'] as int;
-                  final sensorType = parsedData['sensorType'] as String;
-                  final value = parsedData['value'] as double;
-
-                  measurementGroups[timestamp] ??= {};
-                  measurementGroups[timestamp]![sensorType] = value;
-                }
-              }
-            },
-            onError: (error) {
-              if (!completer.isCompleted) {
-                completer.complete();
-              }
-            },
-          );
-
-      // Send history command
-      final txCharacteristic = QualifiedCharacteristic(
-        serviceId: _nusServiceUuid,
-        characteristicId: _rxCharacteristicUuid,
-        deviceId: deviceId,
-      );
-
-      await _ble.writeCharacteristicWithoutResponse(
-        txCharacteristic,
-        value: command,
-      );
-
-      // Wait for completion
-      await completer.future;
-
-      // Clean up timers and subscription
-      silenceTimer.cancel();
-      globalTimer.cancel();
-      await subscription.cancel();
-
-      // Convert grouped measurements to RuuviHistoryMeasurement objects
-      for (final entry in measurementGroups.entries) {
-        final timestamp = DateTime.fromMillisecondsSinceEpoch(entry.key * 1000);
-        final values = entry.value;
-
-        measurements.add(
-          RuuviHistoryMeasurement(
-            timestamp: timestamp,
-            temperature: values['temperature'],
-            humidity: values['humidity'],
-            pressure: values['pressure'],
-          ),
-        );
-      }
-
-      // Sort by timestamp
-      measurements.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-      return RuuviHistoryCollection(
-        measurements: measurements,
-        deviceId: deviceId,
-      );
-    } catch (e) {
-      throw RuuviConnectionException('Failed to read history from epoch: $e');
-    }
+  }) {
+    return getAllHistory(deviceId, endDate: endDate);
   }
 
-  /// Parses a Ruuvi Log Response packet (11 bytes)
-  Map<String, dynamic>? _parseRuuviLogResponse(Uint8List data) {
-    if (data.length != 11) return null;
-
-    try {
-      final source = data[1];
-      final type = data[2];
-
-      if (type != 0x10) return null; // Not a log write response
-
-      // Parse timestamp (4 bytes, big-endian)
-      final timestamp =
-          (data[3] << 24) | (data[4] << 16) | (data[5] << 8) | data[6];
-
-      // Parse value (4 bytes, big-endian, signed)
-      final rawValue =
-          (data[7] << 24) | (data[8] << 16) | (data[9] << 8) | data[10];
-      final value = rawValue > 0x7FFFFFFF ? rawValue - 0x100000000 : rawValue;
-
-      // Check for end marker
-      if (value == -1) {
-        return {'isEndMarker': true};
-      }
-
-      // Convert based on source endpoint
-      String sensorType;
-      double convertedValue;
-
-      switch (source) {
-        case 0x30: // temperature endpoint
-          sensorType = 'temperature';
-          convertedValue = value * 0.01; // 0.01°C per LSB
-          break;
-        case 0x31: // humidity endpoint
-          sensorType = 'humidity';
-          convertedValue = value * 0.01; // 0.01% per LSB
-          break;
-        case 0x32: // pressure endpoint
-          sensorType = 'pressure';
-          convertedValue = value.toDouble() / 100.0; // 1 Pa per LSB -> hPa
-          break;
-        default:
-          return null; // Unknown sensor type
-      }
-
-      return {
-        'timestamp': timestamp,
-        'sensorType': sensorType,
-        'value': convertedValue,
-        'isEndMarker': false,
-      };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Cleans up active connections and subscriptions for a device
-  Future<void> _cleanupDevice(String deviceId) async {
-    try {
-      // Cancel active subscription
-      final subscription = _activeSubscriptions.remove(deviceId);
-      if (subscription != null) {
-        await subscription.cancel();
-      }
-
-      // Cancel active connection
-      final connection = _activeConnections.remove(deviceId);
-      if (connection != null) {
-        await connection.cancel();
-      }
-    } catch (e) {
-      // Ignore cleanup errors to prevent cascading failures
-    }
-  }
-
-  /// Disposes all active connections and subscriptions
+  /// Disconnects from every tag this reader is connected to.
   Future<void> dispose() async {
-    final deviceIds = [
-      ..._activeSubscriptions.keys,
-      ..._activeConnections.keys,
-    ];
-    for (final deviceId in deviceIds) {
-      await _cleanupDevice(deviceId);
+    for (final id in _connected.toList()) {
+      await _disconnect(BluetoothDevice.fromId(id));
     }
+  }
+
+  /// `[0x3A, 0x3A, 0x11, now (u32 BE), start (u32 BE)]`, Unix seconds.
+  static List<int> _buildLogReadCommand(DateTime now, DateTime start) {
+    List<int> u32(DateTime d) {
+      final s = d.millisecondsSinceEpoch ~/ 1000;
+      return [(s >> 24) & 0xFF, (s >> 16) & 0xFF, (s >> 8) & 0xFF, s & 0xFF];
+    }
+
+    return [0x3A, 0x3A, 0x11, ...u32(now), ...u32(start)];
+  }
+
+  Future<BluetoothDevice> _connect(String deviceId) async {
+    await ensureBluetoothReady();
+    final device = BluetoothDevice.fromId(deviceId);
+    try {
+      await device.connect(timeout: _connectionTimeout);
+      _connected.add(deviceId);
+      return device;
+    } catch (e) {
+      await _disconnect(device);
+      throw RuuviConnectionException(
+        'Failed to connect to device $deviceId: $e',
+      );
+    }
+  }
+
+  Future<void> _disconnect(BluetoothDevice device) async {
+    _connected.remove(device.remoteId.str);
+    try {
+      await device.disconnect();
+    } catch (_) {
+      // Already disconnected.
+    }
+  }
+
+  /// Runs [action] once every earlier operation on [deviceId] has finished.
+  Future<T> _exclusive<T>(String deviceId, Future<T> Function() action) {
+    final previous = _pending[deviceId] ?? Future<void>.value();
+    final result = previous.then((_) => action());
+    final tail = result.then<void>((_) {}, onError: (_) {});
+    _pending[deviceId] = tail;
+    tail.whenComplete(() {
+      if (identical(_pending[deviceId], tail)) _pending.remove(deviceId);
+    });
+    return result;
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:ruuvi_sensor/ruuvi_sensor.dart';
 
@@ -31,6 +33,7 @@ class RuuviHomePage extends StatefulWidget {
 class _RuuviHomePageState extends State<RuuviHomePage> {
   final RuuviBleScanner _scanner = RuuviBleScanner();
   final RuuviHistoryReader _historyReader = RuuviHistoryReader();
+  StreamSubscription<List<RuuviBleScanResult>>? _devicesSubscription;
 
   List<RuuviBleScanResult> _discoveredTags = [];
   List<RuuviHistoryMeasurement> _historyData = [];
@@ -44,8 +47,8 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
   @override
   void initState() {
     super.initState();
-    _scanner.devicesStream.listen((devices) {
-      setState(() {
+    _devicesSubscription = _scanner.devicesStream.listen((devices) {
+      _update(() {
         _discoveredTags = devices;
       });
     });
@@ -53,26 +56,33 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
 
   @override
   void dispose() {
+    _devicesSubscription?.cancel();
     _scanner.dispose();
+    _historyReader.dispose();
     super.dispose();
+  }
+
+  /// setState that is safe to call after an await.
+  void _update(VoidCallback fn) {
+    if (mounted) setState(fn);
   }
 
   Future<void> _startScan() async {
     try {
-      setState(() {
+      _update(() {
         _isScanning = true;
         _statusMessage = 'Scanning for RuuviTags...';
       });
 
       await _scanner.startScan(timeout: const Duration(seconds: 30));
 
-      setState(() {
+      _update(() {
         _isScanning = false;
         _statusMessage =
             'Scan completed. Found ${_discoveredTags.length} RuuviTags.';
       });
     } catch (e) {
-      setState(() {
+      _update(() {
         _isScanning = false;
         _statusMessage = 'Scan error: $e';
       });
@@ -82,12 +92,12 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
   Future<void> _stopScan() async {
     try {
       await _scanner.stopScan();
-      setState(() {
+      _update(() {
         _isScanning = false;
         _statusMessage = 'Scan stopped.';
       });
     } catch (e) {
-      setState(() {
+      _update(() {
         _statusMessage = 'Stop scan error: $e';
       });
     }
@@ -95,7 +105,7 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
 
   Future<void> _getAllHistory(RuuviBleScanResult tag) async {
     try {
-      setState(() {
+      _update(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
         _activeButton = 'all_${tag.deviceId}';
@@ -106,15 +116,16 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
       // Récupérer TOUT l'historique disponible avec startDate = null
       final history = await _historyReader.getAllHistory(tag.deviceId);
 
-      setState(() {
+      _update(() {
         _isLoadingHistory = false;
         _activeButton = '';
         _historyData = history.measurements;
         _statusMessage =
-            'ALL History loaded: ${_historyData.length} measurements for ${tag.displayName}';
+            'ALL History loaded: ${_historyData.length} measurements for ${tag.displayName}'
+            '${history.isComplete ? '' : ' (incomplete)'}';
       });
     } catch (e) {
-      setState(() {
+      _update(() {
         _isLoadingHistory = false;
         _activeButton = '';
         _statusMessage = 'ALL History error: $e';
@@ -154,7 +165,7 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
     );
 
     try {
-      setState(() {
+      _update(() {
         _isLoadingHistory = true;
         _selectedTag = tag;
         _activeButton = 'date_${tag.deviceId}';
@@ -169,48 +180,19 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
         startDate: startDateTime,
       );
 
-      setState(() {
+      _update(() {
         _isLoadingHistory = false;
         _activeButton = '';
         _historyData = history.measurements;
         _statusMessage =
-            'History from ${startDateTime.toString().substring(0, 16)}: ${_historyData.length} measurements for ${tag.displayName}';
+            'History from ${startDateTime.toString().substring(0, 16)}: ${_historyData.length} measurements for ${tag.displayName}'
+            '${history.isComplete ? '' : ' (incomplete)'}';
       });
     } catch (e) {
-      setState(() {
+      _update(() {
         _isLoadingHistory = false;
         _activeButton = '';
         _statusMessage = 'History from date error: $e';
-      });
-    }
-  }
-
-  Future<void> _getHistoryFromEpoch(RuuviBleScanResult tag) async {
-    try {
-      setState(() {
-        _isLoadingHistory = true;
-        _selectedTag = tag;
-        _activeButton = 'epoch_${tag.deviceId}';
-        _statusMessage =
-            'Testing history from EPOCH (1970) for ${tag.displayName}...';
-        _historyData.clear();
-      });
-
-      // Tester avec startTime = 0 (epoch)
-      final history = await _historyReader.getHistoryFromEpoch(tag.deviceId);
-
-      setState(() {
-        _isLoadingHistory = false;
-        _activeButton = '';
-        _historyData = history.measurements;
-        _statusMessage =
-            'EPOCH History: ${_historyData.length} measurements for ${tag.displayName}';
-      });
-    } catch (e) {
-      setState(() {
-        _isLoadingHistory = false;
-        _activeButton = '';
-        _statusMessage = 'EPOCH History error: $e';
       });
     }
   }
@@ -353,36 +335,6 @@ class _RuuviHomePageState extends State<RuuviHomePage> {
                                             )
                                           : const Text(
                                               'Date',
-                                              style: TextStyle(fontSize: 8),
-                                            ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Expanded(
-                                    child: ElevatedButton(
-                                      onPressed: _isLoadingHistory
-                                          ? null
-                                          : () => _getHistoryFromEpoch(tag),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 8,
-                                        ),
-                                      ),
-                                      child:
-                                          _activeButton ==
-                                              'epoch_${tag.deviceId}'
-                                          ? const SizedBox(
-                                              width: 12,
-                                              height: 12,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white,
-                                              ),
-                                            )
-                                          : const Text(
-                                              'Epoch',
                                               style: TextStyle(fontSize: 8),
                                             ),
                                     ),

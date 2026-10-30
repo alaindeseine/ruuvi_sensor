@@ -68,6 +68,43 @@ void main() {
     test('getCompleteOnly keeps measurements with all sensors', () {
       expect(collection.getCompleteOnly().length, 1);
     });
+
+    test('filterByDateRange includes both bounds', () {
+      final filtered = collection.filterByDateRange(
+        DateTime.utc(2026, 1, 15, 8),
+        DateTime.utc(2026, 1, 15, 9),
+      );
+      expect(filtered.length, 2);
+    });
+
+    test('is complete by default and propagates the flag', () {
+      expect(collection.isComplete, isTrue);
+      final partial = RuuviHistoryCollection(
+        deviceId: collection.deviceId,
+        measurements: collection.measurements,
+        isComplete: false,
+      );
+      expect(partial.getCompleteOnly().isComplete, isFalse);
+      expect(
+        partial.filterByDateRange(DateTime(2000), DateTime(2100)).isComplete,
+        isFalse,
+      );
+    });
+  });
+
+  group('RuuviBleScanResult', () {
+    test('exposes pressure in hPa alongside Pa', () {
+      final result = RuuviBleScanResult(
+        deviceId: 'AA:BB:CC:DD:EE:FF',
+        name: '',
+        rssi: -60,
+        pressure: 101325,
+        lastSeen: DateTime(2026),
+      );
+      expect(result.pressureHPa, closeTo(1013.25, 1e-9));
+      expect(result.displayName, 'Ruuvi EEFF');
+      expect(result.hasValidData, isFalse);
+    });
   });
 
   group('RuuviTagInformation', () {

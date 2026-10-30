@@ -107,12 +107,19 @@ class RuuviHistoryMeasurement {
 
 /// Collection of history measurements with utility methods
 class RuuviHistoryCollection {
+  /// Measurements sorted by timestamp, oldest first.
   final List<RuuviHistoryMeasurement> measurements;
   final String deviceId;
+
+  /// `true` when the tag signalled the end of its log. `false` when the read
+  /// stopped early (connection lost, tag silent, firmware or global timeout):
+  /// [measurements] then only holds what was received before that.
+  final bool isComplete;
 
   const RuuviHistoryCollection({
     required this.measurements,
     required this.deviceId,
+    this.isComplete = true,
   });
 
   /// Returns the number of measurements
@@ -138,18 +145,29 @@ class RuuviHistoryCollection {
     return measurements.last.timestamp.difference(measurements.first.timestamp);
   }
 
-  /// Returns measurements filtered by date range
+  /// Returns measurements between [start] and [end], both inclusive.
   RuuviHistoryCollection filterByDateRange(DateTime start, DateTime end) {
     final filtered = measurements
-        .where((m) => m.timestamp.isAfter(start) && m.timestamp.isBefore(end))
+        .where((m) => !m.timestamp.isBefore(start) && !m.timestamp.isAfter(end))
         .toList();
-    return RuuviHistoryCollection(measurements: filtered, deviceId: deviceId);
+    return RuuviHistoryCollection(
+      measurements: filtered,
+      deviceId: deviceId,
+      isComplete: isComplete,
+    );
   }
 
-  /// Returns only complete measurements (all sensors present)
+  /// Returns only measurements that have temperature, humidity and pressure.
+  ///
+  /// Tags whose firmware only logs some sensors (e.g. temperature only) yield
+  /// an empty collection here.
   RuuviHistoryCollection getCompleteOnly() {
     final complete = measurements.where((m) => m.isComplete()).toList();
-    return RuuviHistoryCollection(measurements: complete, deviceId: deviceId);
+    return RuuviHistoryCollection(
+      measurements: complete,
+      deviceId: deviceId,
+      isComplete: isComplete,
+    );
   }
 
   /// Returns average values for the collection

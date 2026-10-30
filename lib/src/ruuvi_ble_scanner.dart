@@ -1,23 +1,30 @@
 import 'dart:async';
-import 'dart:typed_data';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
-import 'package:permission_handler/permission_handler.dart';
+
+import 'package:flutter_blue_ultra/flutter_blue_ultra.dart';
+
 import 'exceptions/ruuvi_exceptions.dart';
+import 'ruuvi_advertisement_decoder.dart';
+import 'ruuvi_permissions.dart';
 
-/// Scanner for RuuviTag devices using flutter_reactive_ble
+/// Scanner for RuuviTag advertisements.
+///
+/// Decodes data formats 3 (RAWv1) and 5 (RAWv2). Tags broadcasting another
+/// format are still listed, with [RuuviBleScanResult.dataFormat] set and no
+/// sensor values.
 class RuuviBleScanner {
-  final FlutterReactiveBle _ble = FlutterReactiveBle();
-
-  static const int _ruuviManufacturerId = 0x0499; // Ruuvi Innovations Ltd
-
   final StreamController<List<RuuviBleScanResult>> _devicesController =
       StreamController<List<RuuviBleScanResult>>.broadcast();
 
   final Map<String, RuuviBleScanResult> _discoveredDevices = {};
-  StreamSubscription<DiscoveredDevice>? _scanSubscription;
+  StreamSubscription<List<ScanResult>>? _scanSubscription;
+  Timer? _timeoutTimer;
   bool _isScanning = false;
 
-  /// Stream of discovered RuuviTag devices
+  /// Stream of discovered RuuviTag devices.
+  ///
+  /// Emits the full device list each time an advertisement is received, i.e.
+  /// several times per second when tags are nearby. Scan failures are emitted
+  /// as [RuuviException] errors.
   Stream<List<RuuviBleScanResult>> get devicesStream =>
       _devicesController.stream;
 
@@ -28,47 +35,46 @@ class RuuviBleScanner {
   /// Whether the scanner is currently scanning
   bool get isScanning => _isScanning;
 
-  /// Starts scanning for RuuviTag devices
+  /// Starts scanning for RuuviTag devices.
   ///
-  /// [timeout] optional timeout duration for the scan
-  /// Throws [RuuviException] if scanning fails
+  /// [timeout] optional duration after which the scan stops by itself.
+  /// Throws [RuuviException] if Bluetooth is unavailable, a permission is
+  /// denied, or scanning fails to start.
   Future<void> startScan({Duration? timeout}) async {
     if (_isScanning) {
       return; // Already scanning
     }
+    _isScanning = true;
 
     try {
-      // Check and request permissions
-      await _checkPermissions();
+      await ensureBluetoothReady();
 
-      _isScanning = true;
       _discoveredDevices.clear();
       _devicesController.add([]);
 
-      // Start scanning for devices with Ruuvi manufacturer data
-      _scanSubscription = _ble
-          .scanForDevices(
-            withServices: [],
-            scanMode: ScanMode.lowLatency,
-            requireLocationServicesEnabled: false,
-          )
-          .listen(
-            (device) {
-              _handleDiscoveredDevice(device);
-            },
-            onError: (error) {
-              throw RuuviException('Scan error: $error');
-            },
-          );
-
-      // Set timeout if provided
-      if (timeout != null) {
-        Timer(timeout, () {
+      _scanSubscription = FlutterBlueUltra.onScanResults.listen(
+        _handleScanResults,
+        onError: (Object error) {
+          _devicesController.addError(RuuviException('Scan error: $error'));
           stopScan();
-        });
+        },
+      );
+
+      // Every advertisement is needed to keep the sensor values fresh.
+      await FlutterBlueUltra.startScan(
+        withMsd: [MsdFilter(ruuviManufacturerId)],
+        continuousUpdates: true,
+        oneByOne: true,
+      );
+
+      if (timeout != null) {
+        _timeoutTimer = Timer(timeout, stopScan);
       }
     } catch (e) {
+      await _scanSubscription?.cancel();
+      _scanSubscription = null;
       _isScanning = false;
+      if (e is RuuviException) rethrow;
       throw RuuviException('Failed to start scan: $e');
     }
   }
@@ -77,210 +83,115 @@ class RuuviBleScanner {
   Future<void> stopScan() async {
     if (!_isScanning) return;
 
+    _timeoutTimer?.cancel();
+    _timeoutTimer = null;
+    _isScanning = false;
     try {
       await _scanSubscription?.cancel();
       _scanSubscription = null;
-      _isScanning = false;
+      await FlutterBlueUltra.stopScan();
     } catch (e) {
       throw RuuviException('Failed to stop scan: $e');
     }
   }
 
-  /// Handles a discovered device and checks if it's a RuuviTag
-  void _handleDiscoveredDevice(DiscoveredDevice device) {
-    try {
-      // Check if device has manufacturer data
-      final manufacturerData = device.manufacturerData;
-      if (manufacturerData.isEmpty) return;
+  void _handleScanResults(List<ScanResult> results) {
+    for (final result in results) {
+      final payload =
+          result.advertisementData.manufacturerData[ruuviManufacturerId];
+      if (payload == null) continue;
 
-      // flutter_reactive_ble provides manufacturerData as Uint8List directly
-      // The first 2 bytes are the manufacturer ID (little-endian)
-      if (manufacturerData.length < 3) {
-        return; // Need at least manufacturer ID + 1 data byte
-      }
+      final data = decodeRuuviAdvertisement(payload);
+      if (data == null) continue;
 
-      // Extract manufacturer ID (first 2 bytes, little-endian)
-      final manufacturerId = (manufacturerData[1] << 8) | manufacturerData[0];
-
-      // Check if it's Ruuvi manufacturer ID (0x0499)
-      if (manufacturerId != _ruuviManufacturerId) return;
-
-      // Extract Ruuvi data (skip first 2 bytes which are manufacturer ID)
-      final ruuviData = Uint8List.fromList(manufacturerData.sublist(2));
-
-      // Parse Ruuvi data
-      final parsedData = _parseRuuviData(ruuviData);
-      if (parsedData == null) return;
-
-      // Validate parsed data ranges
-      final temperature = parsedData['temperature'] as double?;
-      final humidity = parsedData['humidity'] as double?;
-      final pressure = parsedData['pressure'] as double?;
-
-      // Skip if values are clearly invalid
-      if (temperature != null && (temperature < -40 || temperature > 85)) {
-        return;
-      }
-      if (humidity != null && (humidity < 0 || humidity > 100)) return;
-      if (pressure != null && (pressure < 30000 || pressure > 110000)) {
-        return; // 300-1100 hPa in Pa
-      }
-
-      // Create or update scan result
-      final scanResult = RuuviBleScanResult(
-        deviceId: device.id,
-        name: device.name.isNotEmpty
-            ? device.name
-            : 'Ruuvi ${device.id.substring(device.id.length - 4)}',
-        rssi: device.rssi,
-        temperature: temperature,
-        humidity: humidity,
-        pressure: pressure,
-        batteryVoltage: parsedData['batteryVoltage'],
-        dataFormat: parsedData['dataFormat'],
+      final deviceId = result.device.remoteId.str;
+      final advName = result.advertisementData.advName;
+      _discoveredDevices[deviceId] = RuuviBleScanResult(
+        deviceId: deviceId,
+        name: advName.isNotEmpty ? advName : _fallbackName(deviceId),
+        rssi: result.rssi,
+        temperature: data.temperature,
+        humidity: data.humidity,
+        pressure: data.pressure,
+        batteryVoltage: data.batteryVoltage,
+        dataFormat: data.dataFormat,
+        accelerationX: data.accelerationX,
+        accelerationY: data.accelerationY,
+        accelerationZ: data.accelerationZ,
+        txPower: data.txPower,
+        movementCounter: data.movementCounter,
+        measurementSequence: data.measurementSequence,
+        macAddress: data.macAddress,
         lastSeen: DateTime.now(),
       );
-
-      // Update discovered devices
-      _discoveredDevices[device.id] = scanResult;
+    }
+    if (!_devicesController.isClosed) {
       _devicesController.add(discoveredDevices);
-    } catch (e) {
-      // Ignore parsing errors for individual devices
     }
   }
 
-  /// Parses Ruuvi manufacturer data
-  Map<String, dynamic>? _parseRuuviData(Uint8List data) {
-    if (data.length < 2) return null;
-
-    final dataFormat = data[0];
-
-    try {
-      switch (dataFormat) {
-        case 0x03: // RAWv1
-          return _parseRAWv1(data);
-        case 0x05: // RAWv2
-          return _parseRAWv2(data);
-        default:
-          return {
-            'dataFormat': dataFormat,
-            'temperature': double.nan,
-            'humidity': double.nan,
-            'pressure': double.nan,
-            'batteryVoltage': null,
-          };
-      }
-    } catch (e) {
-      return null;
-    }
+  static String _fallbackName(String deviceId) {
+    final hex = deviceId.replaceAll(':', '').toUpperCase();
+    return 'Ruuvi ${hex.length >= 4 ? hex.substring(hex.length - 4) : hex}';
   }
 
-  /// Parses RAWv1 format (0x03)
-  Map<String, dynamic> _parseRAWv1(Uint8List data) {
-    if (data.length < 14) return {};
-
-    final buffer = ByteData.sublistView(data);
-
-    // Format RAWv1: [0x03][temp_h][temp_l][hum_h][hum_l][pres_h][pres_l]...
-    // Temperature (bytes 1-2, signed, big-endian)
-    final tempRaw = buffer.getInt16(1, Endian.big);
-    final temperature = tempRaw / 100.0;
-
-    // Humidity (bytes 3-4, unsigned, big-endian)
-    final humidityRaw = buffer.getUint16(3, Endian.big);
-    final humidity = humidityRaw / 100.0;
-
-    // Pressure (bytes 5-6, unsigned, big-endian)
-    final pressureRaw = buffer.getUint16(5, Endian.big);
-    final pressure = pressureRaw + 50000.0; // Pa
-
-    return {
-      'dataFormat': 0x03,
-      'temperature': temperature,
-      'humidity': humidity,
-      'pressure': pressure,
-      'batteryVoltage': null,
-    };
-  }
-
-  /// Parses RAWv2 format (0x05)
-  Map<String, dynamic> _parseRAWv2(Uint8List data) {
-    if (data.length < 24) return {};
-
-    final buffer = ByteData.sublistView(data);
-
-    // Format RAWv2: [0x05][temp_h][temp_l][hum_h][hum_l][pres_h][pres_l]...
-    // Temperature (bytes 1-2, signed, big-endian, 0.005°C resolution)
-    final tempRaw = buffer.getInt16(1, Endian.big);
-    final temperature = tempRaw * 0.005;
-
-    // Humidity (bytes 3-4, unsigned, big-endian, 0.0025% resolution)
-    final humidityRaw = buffer.getUint16(3, Endian.big);
-    final humidity = humidityRaw * 0.0025;
-
-    // Pressure (bytes 5-6, unsigned, big-endian, 1 Pa resolution, offset +50000 Pa)
-    final pressureRaw = buffer.getUint16(5, Endian.big);
-    final pressure = (pressureRaw + 50000.0); // Pa
-
-    // Battery voltage (bytes 13-14, unsigned, big-endian)
-    final batteryRaw = buffer.getUint16(13, Endian.big);
-    final batteryVoltage = (batteryRaw >> 5) + 1600; // mV
-
-    return {
-      'dataFormat': 0x05,
-      'temperature': temperature,
-      'humidity': humidity,
-      'pressure': pressure,
-      'batteryVoltage': batteryVoltage,
-    };
-  }
-
-  /// Checks and requests necessary permissions for BLE scanning
-  Future<void> _checkPermissions() async {
-    // Check location permission (required for BLE scanning on Android)
-    final locationStatus = await Permission.location.status;
-    if (!locationStatus.isGranted) {
-      final result = await Permission.location.request();
-      if (!result.isGranted) {
-        throw RuuviException(
-          'Location permission is required for BLE scanning',
-        );
-      }
-    }
-
-    // Check Bluetooth permissions (Android 12+)
-    if (await Permission.bluetoothScan.isDenied) {
-      final result = await Permission.bluetoothScan.request();
-      if (!result.isGranted) {
-        throw RuuviException('Bluetooth scan permission is required');
-      }
-    }
-
-    if (await Permission.bluetoothConnect.isDenied) {
-      final result = await Permission.bluetoothConnect.request();
-      if (!result.isGranted) {
-        throw RuuviException('Bluetooth connect permission is required');
-      }
-    }
-  }
-
-  /// Disposes the scanner and cleans up resources
+  /// Stops scanning and releases resources.
   void dispose() {
-    stopScan();
-    _devicesController.close();
+    stopScan().whenComplete(_devicesController.close);
   }
 }
 
-/// Result from BLE scan of a RuuviTag
+/// Result from BLE scan of a RuuviTag.
+///
+/// Any sensor value is `null` when the tag reports it as unavailable or when
+/// its data format doesn't carry it. Equality is based on [deviceId] only.
 class RuuviBleScanResult {
+  /// Platform identifier of the device (the MAC address on Android).
   final String deviceId;
+
+  /// Advertised name, or `Ruuvi XXXX` (last MAC digits) if none.
   final String name;
+
+  /// Signal strength in dBm.
   final int rssi;
+
+  /// Temperature in °C.
   final double? temperature;
+
+  /// Relative humidity in %.
   final double? humidity;
+
+  /// Pressure in **Pa** (see [pressureHPa]). History values are in hPa.
   final double? pressure;
+
+  /// Battery voltage in mV.
   final int? batteryVoltage;
+
+  /// Advertisement data format (3 = RAWv1, 5 = RAWv2).
   final int? dataFormat;
+
+  /// Acceleration on the X axis in g.
+  final double? accelerationX;
+
+  /// Acceleration on the Y axis in g.
+  final double? accelerationY;
+
+  /// Acceleration on the Z axis in g.
+  final double? accelerationZ;
+
+  /// Transmit power in dBm (RAWv2 only).
+  final int? txPower;
+
+  /// Movement counter, incremented by motion interrupts (RAWv2 only).
+  final int? movementCounter;
+
+  /// Measurement sequence number (RAWv2 only).
+  final int? measurementSequence;
+
+  /// MAC address broadcast in the payload (RAWv2 only).
+  final String? macAddress;
+
+  /// When this advertisement was received.
   final DateTime lastSeen;
 
   const RuuviBleScanResult({
@@ -292,8 +203,18 @@ class RuuviBleScanResult {
     this.pressure,
     this.batteryVoltage,
     this.dataFormat,
+    this.accelerationX,
+    this.accelerationY,
+    this.accelerationZ,
+    this.txPower,
+    this.movementCounter,
+    this.measurementSequence,
+    this.macAddress,
     required this.lastSeen,
   });
+
+  /// Pressure in hPa, the unit used by history measurements.
+  double? get pressureHPa => pressure == null ? null : pressure! / 100.0;
 
   /// Returns a display name for the device
   String get displayName {
@@ -307,14 +228,9 @@ class RuuviBleScanResult {
     return 'Ruuvi $lastChars';
   }
 
-  /// Returns true if the device has valid sensor data
+  /// Returns true if temperature, humidity and pressure are all available.
   bool get hasValidData {
-    return temperature != null &&
-        !temperature!.isNaN &&
-        humidity != null &&
-        !humidity!.isNaN &&
-        pressure != null &&
-        !pressure!.isNaN;
+    return temperature != null && humidity != null && pressure != null;
   }
 
   @override
